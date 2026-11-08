@@ -86,13 +86,19 @@ struct SharedSettings: Equatable {
 	var showsStatistics: Bool
 	var smoothMotion: Bool
 
-	/// This Mac's settings, from user defaults.
+	/// This Mac's settings, from the standard user defaults.
 	static var current: SharedSettings {
-		get { SharedSettings(showsStatistics: StatisticsPreference.isOn, smoothMotion: SmoothMotionPreference.isOn) }
-		set {
-			StatisticsPreference.isOn = newValue.showsStatistics
-			SmoothMotionPreference.isOn = newValue.smoothMotion
-		}
+		get { load(from: .standard) }
+		set { newValue.save(to: .standard) }
+	}
+
+	static func load(from defaults: UserDefaults) -> SharedSettings {
+		SharedSettings(showsStatistics: defaults.bool(forKey: StatisticsPreference.key), smoothMotion: defaults.bool(forKey: SmoothMotionPreference.key))
+	}
+
+	func save(to defaults: UserDefaults) {
+		defaults.set(showsStatistics, forKey: StatisticsPreference.key)
+		defaults.set(smoothMotion, forKey: SmoothMotionPreference.key)
 	}
 }
 
@@ -100,18 +106,26 @@ struct SharedSettings: Equatable {
 /// is sent to the other, and one received from it is applied here without being sent back.
 @MainActor
 final class SettingsSync {
+	private let defaults: UserDefaults
 	private var observer: NSObjectProtocol?
 	/// The settings last sent or received, so applying a received change does not echo it back.
-	private var lastSeen = SharedSettings.current
+	private var lastSeen: SharedSettings
+	/// True while saving received settings. User defaults posts its change notification
+	/// synchronously for each key saved, so between the two saves the settings read half-applied;
+	/// sending that state back switched Smooth Motion off again on the Mac that turned it on.
+	private var applying = false
 	private let send: (SharedSettings) -> Void
 	private let onChange: (SharedSettings) -> Void
 
 	/// - Parameters:
+	///   - defaults: Where the settings are kept; the standard user defaults except in tests.
 	///   - send: Sends a change to the other Mac; does nothing when not connected.
 	///   - onChange: Called after any change, made here or received.
-	init(send: @escaping (SharedSettings) -> Void, onChange: @escaping (SharedSettings) -> Void = { _ in }) {
+	init(defaults: UserDefaults = .standard, send: @escaping (SharedSettings) -> Void, onChange: @escaping (SharedSettings) -> Void = { _ in }) {
+		self.defaults = defaults
 		self.send = send
 		self.onChange = onChange
+		lastSeen = SharedSettings.load(from: defaults)
 		observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
 			MainActor.assumeIsolated { self?.localChange() }
 		}
@@ -119,16 +133,19 @@ final class SettingsSync {
 
 	/// Applies the other Mac's settings here.
 	func receive(_ settings: SharedSettings) {
-		let changed = settings != lastSeen
+		let changed = settings != SharedSettings.load(from: defaults)
+		applying = true
+		settings.save(to: defaults)
+		applying = false
 		lastSeen = settings
-		SharedSettings.current = settings
 		if changed {
 			onChange(settings)
 		}
 	}
 
 	private func localChange() {
-		let settings = SharedSettings.current
+		guard !applying else { return }
+		let settings = SharedSettings.load(from: defaults)
 		guard settings != lastSeen else { return }
 		lastSeen = settings
 		send(settings)
