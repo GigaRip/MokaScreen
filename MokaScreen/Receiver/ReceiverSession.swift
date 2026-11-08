@@ -203,8 +203,8 @@ final class ReceiverSession {
 			}
 		})
 		connection = Connection(receiver: receiver, renderer: renderer)
-		renderer.onPresented = { [weak receiver] frameID in
-			receiver?.reportPresented(frameID: frameID)
+		renderer.onPresented = { [weak receiver] frameID, glassTime in
+			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)
 		}
 		self.connection = connection
 		receiver.start()

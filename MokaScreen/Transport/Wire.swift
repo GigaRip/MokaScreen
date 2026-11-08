@@ -207,16 +207,22 @@ struct RectMessage: Equatable {
 /// Receiver → sender: the frame with this ID (and every earlier one) is on glass.
 struct PresentedMessage: Equatable {
 	var frameID: UInt64
+	/// The frame's glass time minus the time this message was written, on the display Mac's
+	/// clock, in microseconds. macOS can call a drawable's presented handler before the frame's
+	/// `presentedTime`, so the sender adds this to the acknowledgement's arrival to time capture
+	/// → glass without a shared clock. Zero from 0.1.12 and earlier.
+	var glassOffsetMicros: Int32 = 0
 
 	func encode(into p: UnsafeMutableRawPointer) {
 		WireHeader.clear(p)
 		WireHeader.store(MessageType.presented.rawValue, p, 0)
+		WireHeader.store(UInt32(bitPattern: glassOffsetMicros), p, 4)
 		WireHeader.store(frameID, p, 8)
 	}
 
 	static func decode(_ p: UnsafeRawPointer) throws -> PresentedMessage {
 		try WireHeader.expect(.presented, p)
-		return PresentedMessage(frameID: WireHeader.load64(p, 8))
+		return PresentedMessage(frameID: WireHeader.load64(p, 8), glassOffsetMicros: Int32(bitPattern: WireHeader.load32(p, 4)))
 	}
 }
 

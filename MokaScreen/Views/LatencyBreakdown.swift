@@ -122,13 +122,13 @@ struct LatencyBreakdown: View {
 		.frame(height: 64)
 	}
 
-	/// Green within one and a half refreshes, amber within two and a half, red beyond. Drawing on
-	/// arrival puts a frame on the display Mac's next refresh, about one refresh in all; 0.1.8's
-	/// display-link path took about two and a half.
+	/// Green within two refreshes, amber within three, red beyond. A full-screen change takes about
+	/// 3.6 ms on the cable and then the display Mac's next refresh, about one and a half refreshes
+	/// in all; 0.1.8's display-link path took about two and a half.
 	private var tint: Color {
 		guard total > 0 else { return .secondary }
-		if total <= frameBudget * 1.5 { return .green }
-		if total <= frameBudget * 2.5 { return .orange }
+		if total <= frameBudget * 2 { return .green }
+		if total <= frameBudget * 3 { return .orange }
 		return .red
 	}
 

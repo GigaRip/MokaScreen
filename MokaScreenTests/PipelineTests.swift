@@ -160,7 +160,7 @@ private struct Loopback {
 
 		sender = FrameSender(stream: client, width: width, height: height, stats: senderStats, showsStatistics: showsStatistics, onStatistics: { [senderHeard] in senderHeard.record($0) }) { _ in }
 		let receiver = receiver
-		sink.onCommit = { receiver.reportPresented(frameID: $0) }
+		sink.onCommit = { receiver.reportPresented(frameID: $0, glassTime: HostClock.now) }
 	}
 
 	func close() {

@@ -69,6 +69,7 @@ final class FrameReceiver {
 	private let ackQueue = DispatchQueue(label: "com.gigarip.mokascreen.ack", qos: .userInteractive)
 	private let ackLock = NSLock()
 	private var latestPresented: UInt64 = 0
+	private var latestGlassTime: UInt64 = 0
 	private var ackScheduled = false
 
 	/// - Parameters:
@@ -104,11 +105,15 @@ final class FrameReceiver {
 		stream.close()
 	}
 
-	/// Tells the sender that `frameID` reached the display. Acknowledgements are coalesced, so a
-	/// slow write never queues more than one behind it. Thread-safe.
-	func reportPresented(frameID: UInt64) {
+	/// Tells the sender that `frameID` reached the display at `glassTime`, in host nanoseconds.
+	/// Acknowledgements are coalesced, so a slow write never queues more than one behind it.
+	/// Thread-safe.
+	func reportPresented(frameID: UInt64, glassTime: UInt64) {
 		ackLock.lock()
-		latestPresented = max(latestPresented, frameID)
+		if frameID >= latestPresented {
+			latestPresented = frameID
+			latestGlassTime = glassTime
+		}
 		let schedule = !ackScheduled
 		ackScheduled = true
 		ackLock.unlock()
@@ -116,9 +121,13 @@ final class FrameReceiver {
 		ackQueue.async { [self] in
 			ackLock.lock()
 			let frameID = latestPresented
+			let glassTime = latestGlassTime
 			ackScheduled = false
 			ackLock.unlock()
-			try? stream.writeHeader { PresentedMessage(frameID: frameID).encode(into: $0) }
+			try? stream.writeHeader {
+				let offset = (Int64(bitPattern: glassTime) - Int64(bitPattern: HostClock.now)) / 1000
+				PresentedMessage(frameID: frameID, glassOffsetMicros: Int32(clamping: offset)).encode(into: $0)
+			}
 		}
 	}
 

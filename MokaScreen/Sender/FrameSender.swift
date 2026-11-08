@@ -206,7 +206,8 @@ final class FrameSender {
 				switch message {
 				case .presented(let presented):
 					if let captureTime = inflight.take(upTo: presented.frameID) {
-						stats.recordPresented(latency: Double(HostClock.now &- captureTime) / 1e9)
+						let arrival = Double(HostClock.now &- captureTime) / 1e9
+						stats.recordPresented(latency: arrival + Double(presented.glassOffsetMicros) / 1e6)
 					}
 				case .statistics(let statistics):
 					onStatistics(statistics.visible)

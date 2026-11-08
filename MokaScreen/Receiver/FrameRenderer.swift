@@ -47,8 +47,9 @@ final class FrameRenderer: FrameSink {
 	private var needsRedraw = true
 	private var shuttingDown = false
 
-	/// Called from a Metal thread with the newest frame ID each time a drawable reaches the screen.
-	var onPresented: ((UInt64) -> Void)?
+	/// Called from a Metal thread with the newest frame ID and its glass time, in host
+	/// nanoseconds, each time a drawable is presented.
+	var onPresented: ((UInt64, UInt64) -> Void)?
 
 	/// Called from the reader thread whenever there is something new to draw.
 	var onWork: (() -> Void)? {
@@ -281,7 +282,7 @@ final class FrameRenderer: FrameSink {
 			for received in receivedTimes {
 				stats.recordPresented(delay: Double(presentedNanos &- received) / 1e9)
 			}
-			onPresented?(newest)
+			onPresented?(newest, presentedNanos)
 		}
 		commandBuffer.present(drawable)
 		let slots = frames.map(\.slot)
