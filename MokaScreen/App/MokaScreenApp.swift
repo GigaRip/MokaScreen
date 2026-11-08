@@ -13,6 +13,7 @@ import SwiftUI
 @main
 struct MokaScreenApp: App {
 	@State private var model = AppModel()
+	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
 	/// running; `startingUpdater: true` begins checking for updates at launch.
@@ -38,6 +39,8 @@ struct MokaScreenApp: App {
 			CommandMenu("Develop") {
 				Button("Start Loopback Test") { model.startLoopback() }
 					.disabled(model.isLoopback)
+				Toggle("Show Statistics", isOn: $showsStatistics)
+					.keyboardShortcut("s", modifiers: [.command, .option])
 				Button("Show Latency Clock") { LatencyClock.toggle() }
 					.keyboardShortcut("l", modifiers: [.command, .option])
 				Divider()
@@ -49,6 +52,12 @@ struct MokaScreenApp: App {
 			}
 		}
 	}
+}
+
+/// Whether the windows show detailed statistics. Kept in user defaults, so once turned on it
+/// stays on across launches until turned off.
+enum StatisticsPreference {
+	static let key = "showsStatistics"
 }
 
 /// Which side of the cable this Mac is on.

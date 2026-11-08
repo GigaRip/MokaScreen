@@ -30,6 +30,8 @@ final class SenderSession {
 	private(set) var status: Status = .stopped
 	private(set) var receivers: [String] = []
 	private(set) var displayDescription = "—"
+	/// Refresh rate of the virtual display, while it exists.
+	private(set) var refreshRate: Int?
 	private(set) var stats = SenderSnapshot()
 	private(set) var lastError: String?
 	private(set) var recordingURL: URL?
@@ -79,6 +81,16 @@ final class SenderSession {
 	}
 
 	var isRunning: Bool { status != .stopped }
+
+	/// One line for the main window while connected, such as "120 Hz · 8.4 ms delay": the
+	/// display's refresh rate and the typical time from capture to the other Mac's screen.
+	var performanceSummary: String? {
+		guard case .connected = status, let refreshRate else { return nil }
+		let delay = stats.recentLatency
+		guard delay > 0 else { return "\(refreshRate) Hz" }
+		let milliseconds = delay < 10 ? String(format: "%.1f", delay) : String(format: "%.0f", delay)
+		return "\(refreshRate) Hz  ·  \(milliseconds) ms delay"
+	}
 
 	/// Creates the virtual display, starts capturing it, and connects to a receiver over the
 	/// Thunderbolt Bridge — or, with `loopback`, to a receiver in this same app.
@@ -139,6 +151,7 @@ final class SenderSession {
 		self.display = display
 		try await display.activate()
 		displayDescription = display.currentModeDescription
+		refreshRate = Int(display.refreshRate.rounded())
 		try await startCapture()
 	}
 
@@ -167,6 +180,7 @@ final class SenderSession {
 		link.reset()
 		display = nil
 		displayDescription = "—"
+		refreshRate = nil
 	}
 
 	/// Replaces the virtual display with one sized for `panel`.
@@ -317,6 +331,7 @@ final class SenderSession {
 			closed.continuation.yield(error)
 			closed.continuation.finish()
 		}
+		senderStats.resetRecent()
 		link.setSender(sender)
 		status = .connected(name)
 		lastError = nil

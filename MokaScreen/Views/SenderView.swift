@@ -12,6 +12,7 @@ import SwiftUI
 struct SenderView: View {
 	@Environment(AppModel.self) private var model
 	@Bindable var session: SenderSession
+	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 18) {
@@ -26,6 +27,10 @@ struct SenderView: View {
 
 			GroupBox {
 				VStack(alignment: .leading, spacing: 10) {
+					if let performance = session.performanceSummary {
+						LabeledContent("Performance", value: performance)
+							.monospacedDigit()
+					}
 					LabeledContent("Display", value: session.displayDescription)
 					Picker("Shape", selection: $session.shape) {
 						ForEach(DisplayShape.available(on: session.receiverPanel)) { Text($0.title(on: session.receiverPanel)).tag($0) }
@@ -41,20 +46,22 @@ struct SenderView: View {
 				.padding(6)
 			}
 
-			GroupBox {
-				VStack(alignment: .leading, spacing: 10) {
-					SenderStatsView(stats: session.stats)
-					Toggle("Record statistics to a CSV file", isOn: $session.recordsStats)
-						.font(.callout)
-					if let url = session.recordingURL, session.recordsStats {
-						Text(url.path(percentEncoded: false))
-							.font(.caption)
-							.foregroundStyle(.secondary)
-							.textSelection(.enabled)
+			if showsStatistics {
+				GroupBox {
+					VStack(alignment: .leading, spacing: 10) {
+						SenderStatsView(stats: session.stats)
+						Toggle("Record statistics to a CSV file", isOn: $session.recordsStats)
+							.font(.callout)
+						if let url = session.recordingURL, session.recordsStats {
+							Text(url.path(percentEncoded: false))
+								.font(.caption)
+								.foregroundStyle(.secondary)
+								.textSelection(.enabled)
+						}
 					}
+					.padding(6)
+					.frame(maxWidth: .infinity, alignment: .leading)
 				}
-				.padding(6)
-				.frame(maxWidth: .infinity, alignment: .leading)
 			}
 
 			if let error = session.lastError {

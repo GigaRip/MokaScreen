@@ -12,6 +12,7 @@ import SwiftUI
 struct ReceiverView: View {
 	@Environment(AppModel.self) private var model
 	let session: ReceiverSession
+	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 18) {
@@ -32,14 +33,16 @@ struct ReceiverView: View {
 				.padding(6)
 			}
 
-			GroupBox {
-				StatGrid(rows: [
-					("Received", String(format: "%.0f fps  ·  %.2f Gbps", session.stats.receivedFPS, session.stats.gigabitsPerSecond)),
-					("Presented", String(format: "%.0f fps", session.stats.presentedFPS)),
-					("Arrival → on glass", session.stats.presentDelayP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", session.stats.presentDelayP50, session.stats.presentDelayP99) : "—"),
-				])
-				.padding(6)
-				.frame(maxWidth: .infinity, alignment: .leading)
+			if showsStatistics {
+				GroupBox {
+					StatGrid(rows: [
+						("Received", String(format: "%.0f fps  ·  %.2f Gbps", session.stats.receivedFPS, session.stats.gigabitsPerSecond)),
+						("Presented", String(format: "%.0f fps", session.stats.presentedFPS)),
+						("Arrival → on glass", session.stats.presentDelayP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", session.stats.presentDelayP50, session.stats.presentDelayP99) : "—"),
+					])
+					.padding(6)
+					.frame(maxWidth: .infinity, alignment: .leading)
+				}
 			}
 
 			Text("When the other Mac connects, this screen switches to its display. Press Esc to stop showing it.")

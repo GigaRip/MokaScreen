@@ -25,6 +25,10 @@ struct SenderSnapshot: Equatable {
 	var latencyP50 = 0.0
 	var latencyP99 = 0.0
 	var latencyMax = 0.0
+	/// Median capture → `presented` acknowledgement over the most recent frames, in
+	/// milliseconds; 0 before the first. Unlike the per-second figures it holds its value while
+	/// the screen is idle, when only an occasional frame is sent.
+	var recentLatency = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
@@ -51,7 +55,14 @@ final class SenderStats: @unchecked Sendable {
 	private var current = SenderSnapshot()
 	private var coverageSum = 0.0
 	private var latencies: [Double] = []
+	/// The last ``recentCapacity`` latencies, oldest overwritten first.
+	private var recent: [Double] = []
+	private var recentNext = 0
 	private var since = Date()
+
+	/// Frames behind ``SenderSnapshot/recentLatency``: two seconds at 120 Hz, so a few slow
+	/// full-screen frames sent while idle do not swing it.
+	static let recentCapacity = 240
 
 	func recordCaptured() {
 		lock.withLock { current.capturedFrames += 1 }
@@ -74,7 +85,24 @@ final class SenderStats: @unchecked Sendable {
 
 	/// - Parameter latency: Seconds from capture to the receiver's acknowledgement.
 	func recordPresented(latency: Double) {
-		lock.withLock { latencies.append(latency * 1000) }
+		lock.withLock {
+			let milliseconds = latency * 1000
+			latencies.append(milliseconds)
+			if recent.count < Self.recentCapacity {
+				recent.append(milliseconds)
+			} else {
+				recent[recentNext] = milliseconds
+			}
+			recentNext = (recentNext + 1) % Self.recentCapacity
+		}
+	}
+
+	/// Forgets the recent latencies, so a new connection is not judged by the previous one.
+	func resetRecent() {
+		lock.withLock {
+			recent.removeAll(keepingCapacity: true)
+			recentNext = 0
+		}
 	}
 
 	/// Returns the activity since the previous call and starts a new interval.
@@ -88,6 +116,7 @@ final class SenderStats: @unchecked Sendable {
 			snapshot.latencyP50 = Percentile.of(sorted, 0.5)
 			snapshot.latencyP99 = Percentile.of(sorted, 0.99)
 			snapshot.latencyMax = sorted.last ?? 0
+			snapshot.recentLatency = Percentile.of(recent.sorted(), 0.5)
 			current = SenderSnapshot()
 			coverageSum = 0
 			latencies.removeAll(keepingCapacity: true)
