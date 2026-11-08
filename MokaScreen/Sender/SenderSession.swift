@@ -82,6 +82,15 @@ final class SenderSession {
 
 	var isRunning: Bool { status != .stopped }
 
+	#if DEBUG
+	/// Puts the session in a state for window snapshots, without a display or a connection.
+	func applySnapshotState(status: Status, refreshRate: Int? = nil, stats: SenderSnapshot = SenderSnapshot()) {
+		self.status = status
+		self.refreshRate = refreshRate
+		self.stats = stats
+	}
+	#endif
+
 	/// One line for the main window while connected, such as "120 Hz · 8.4 ms delay": the
 	/// display's refresh rate and the typical time from capture to the other Mac's screen.
 	var performanceSummary: String? {

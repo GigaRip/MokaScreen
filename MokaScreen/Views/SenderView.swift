@@ -19,10 +19,7 @@ struct SenderView: View {
 			RoleHeader(symbol: Role.sender.symbolName, title: "Extending this Mac", status: session.status.label, isActive: session.status.isConnected)
 
 			if session.status == .needsPermission {
-				PermissionCallout {
-					session.stop()
-					session.start()
-				}
+				PermissionCallout(reopen: model.relaunch)
 			}
 
 			InfoSection {
@@ -78,8 +75,6 @@ struct SenderView: View {
 					.foregroundStyle(.secondary)
 			}
 
-			Spacer(minLength: 0)
-
 			HStack {
 				Button("Change Role") { model.reset() }
 				Button("Arrange Displays…") {
@@ -129,22 +124,35 @@ struct RoleHeader: View {
 	}
 }
 
+/// Asks for Screen Recording permission. macOS applies a new grant only to a newly opened
+/// app, so the second step is reopening MokaScreen rather than trying again in place.
 private struct PermissionCallout: View {
-	let retry: () -> Void
+	let reopen: () -> Void
 
 	var body: some View {
-		GroupBox {
-			VStack(alignment: .leading, spacing: 8) {
-				Text("MokaScreen needs Screen Recording permission to read the extended display. Turn it on for MokaScreen in System Settings, then try again.")
+		HStack(alignment: .top, spacing: 14) {
+			Image(systemName: "lock.display")
+				.font(.system(size: 26))
+				.foregroundStyle(.orange)
+				.frame(width: 32)
+			VStack(alignment: .leading, spacing: 10) {
+				Text("Allow Screen Recording")
+					.font(.headline)
+				Text("MokaScreen reads the extended display with Screen Recording. Turn on MokaScreen in Privacy & Security › Screen & System Audio Recording, then reopen MokaScreen.")
+					.foregroundStyle(.secondary)
 					.fixedSize(horizontal: false, vertical: true)
 				HStack {
 					Button("Open Privacy Settings") {
 						NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
 					}
-					Button("Try Again", action: retry)
+					.buttonStyle(.borderedProminent)
+					Button("Reopen MokaScreen", action: reopen)
 				}
+				.padding(.top, 2)
 			}
-			.padding(6)
 		}
+		.padding(14)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(.orange.opacity(0.1), in: .rect(cornerRadius: 10))
 	}
 }

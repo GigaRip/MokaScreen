@@ -7,6 +7,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // -----------------------------------------------------------------------------
 
+import os
 import Sparkle
 import SwiftUI
 
@@ -27,11 +28,12 @@ struct MokaScreenApp: App {
 		Window("MokaScreen", id: "main") {
 			ContentView()
 				.environment(model)
-				.frame(minWidth: 520, minHeight: 440)
+				.frame(width: ContentView.width)
 				.task { model.launch() }
 		}
+		// The window takes exactly the content's size and follows it as rows, the statistics,
+		// or the permission prompt come and go, so nothing is ever cut off.
 		.windowResizability(.contentSize)
-		.defaultSize(width: 560, height: 520)
 		.commands {
 			CommandGroup(after: .appInfo) {
 				CheckForUpdatesView(updater: updaterController.updater)
@@ -143,6 +145,25 @@ final class AppModel {
 		} catch {
 			receiver.stop()
 		}
+	}
+
+	/// Quits and opens MokaScreen again, which is how macOS applies a new Screen Recording
+	/// permission. The new copy opens only once this one has exited, because two copies cannot
+	/// both own the virtual display.
+	func relaunch() {
+		let reopen = Process()
+		reopen.executableURL = URL(fileURLWithPath: "/bin/sh")
+		reopen.arguments = [
+			"-c", #"while /bin/kill -0 "$0" 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open "$1""#,
+			String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath,
+		]
+		do {
+			try reopen.run()
+		} catch {
+			Log.app.error("Could not schedule the relaunch: \(error.localizedDescription, privacy: .public)")
+			return
+		}
+		NSApp.terminate(nil)
 	}
 
 	func stopAll() {

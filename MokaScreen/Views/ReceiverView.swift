@@ -37,8 +37,6 @@ struct ReceiverView: View {
 				.foregroundStyle(.secondary)
 				.fixedSize(horizontal: false, vertical: true)
 
-			Spacer(minLength: 0)
-
 			HStack {
 				Button("Change Role") { model.reset() }
 				Spacer()

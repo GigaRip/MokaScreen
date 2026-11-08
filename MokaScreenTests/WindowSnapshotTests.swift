@@ -21,20 +21,38 @@ struct WindowSnapshotTests {
 	@Test(.enabled(if: directory != nil))
 	func renderWindows() throws {
 		let directory = URL(fileURLWithPath: try #require(Self.directory))
+		// A private defaults suite, so the app's real "Show Statistics" setting is untouched.
+		let defaults = try #require(UserDefaults(suiteName: "com.gigarip.mokascreen.snapshots"))
 		let model = AppModel()
+		var connected = SenderSnapshot()
+		connected.recentLatency = 8.4
+		let senderStates: [(String, SenderSession.Status, Int?, SenderSnapshot)] = [
+			("stopped", .stopped, nil, SenderSnapshot()),
+			("permission", .needsPermission, nil, SenderSnapshot()),
+			("connected", .connected("Brian's MacBook Pro"), 120, connected),
+		]
 		for showsStatistics in [false, true] {
-			// A private defaults suite, so the app's real "Show Statistics" setting is untouched.
-			let defaults = try #require(UserDefaults(suiteName: "com.gigarip.mokascreen.snapshots"))
 			defaults.set(showsStatistics, forKey: StatisticsPreference.key)
 			let suffix = showsStatistics ? "-statistics" : ""
-			try render(SenderView(session: model.sender), model: model, defaults: defaults, to: directory.appending(path: "sender\(suffix).png"))
+			for (name, status, refreshRate, stats) in senderStates {
+				model.sender.applySnapshotState(status: status, refreshRate: refreshRate, stats: stats)
+				try render(SenderView(session: model.sender), model: model, defaults: defaults, to: directory.appending(path: "sender-\(name)\(suffix).png"))
+			}
 			try render(ReceiverView(session: model.receiver), model: model, defaults: defaults, to: directory.appending(path: "receiver\(suffix).png"))
 		}
+		model.sender.applySnapshotState(status: .stopped)
 	}
 
+	/// Renders `view` the way ``ContentView`` lays it out: fixed width, natural height.
 	private func render(_ view: some View, model: AppModel, defaults: UserDefaults, to url: URL) throws {
-		let size = NSSize(width: 560, height: 560)
-		let host = NSHostingView(rootView: view.padding(24).frame(width: size.width, height: size.height).environment(model).defaultAppStorage(defaults))
+		let root = view
+			.padding(24)
+			.fixedSize(horizontal: false, vertical: true)
+			.frame(width: ContentView.width)
+			.environment(model)
+			.defaultAppStorage(defaults)
+		let host = NSHostingView(rootView: root)
+		let size = host.fittingSize
 		host.frame = NSRect(origin: .zero, size: size)
 		let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
 		window.contentView = host

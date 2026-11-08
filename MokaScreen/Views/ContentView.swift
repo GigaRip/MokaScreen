@@ -10,6 +10,9 @@
 import SwiftUI
 
 struct ContentView: View {
+	/// The window's fixed width; its height always fits the content.
+	static let width: CGFloat = 560
+
 	@Environment(AppModel.self) private var model
 
 	var body: some View {
@@ -25,6 +28,7 @@ struct ContentView: View {
 			}
 		}
 		.padding(24)
+		.fixedSize(horizontal: false, vertical: true)
 	}
 }
 
@@ -51,7 +55,8 @@ private struct RoleChooser: View {
 				) { model.start(.receiver) }
 			}
 		}
-		.frame(maxWidth: .infinity, maxHeight: .infinity)
+		.frame(maxWidth: .infinity)
+		.padding(.vertical, 24)
 	}
 }
 
@@ -98,7 +103,6 @@ private struct LoopbackView: View {
 				InfoRow("Receiver", model.receiver.status.label)
 				SenderStatsView(stats: model.sender.stats)
 			}
-			Spacer()
 			HStack {
 				Spacer()
 				Button("Stop") { model.stopAll() }
