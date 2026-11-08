@@ -17,3 +17,6 @@ DerivedData/
 
 ## macOS
 .DS_Store
+
+## Wrangler
+.wrangler/

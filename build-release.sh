@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# build-release.sh — build a Developer ID–signed, notarized MokaScreen.app and zip it.
+# build-release.sh — build a Developer ID–signed, notarized MokaScreen.app and zip it, for
+# testing on another Mac without publishing anything. release.sh publishes releases.
 #
 # Usage:
 #   ./build-release.sh            sign, notarize, staple, zip
 #   NOTARIZE=0 ./build-release.sh sign and zip only (Gatekeeper will warn on other Macs)
 #
-# The zip lands in ~/MokaScreenReleases. Copy it to the other Mac (AirDrop, or over the
+# The zip lands in ~/MokaScreenReleases/Builds, apart from the published DMGs, because
+# release.sh's generate_appcast treats every archive in ~/MokaScreenReleases as a release. Copy it to the other Mac (AirDrop, or over the
 # Thunderbolt Bridge), unzip, and drag MokaScreen to /Applications. A notarized app opens
 # on an MDM-managed Mac without needing Xcode or an admin override.
 #
@@ -23,7 +25,7 @@ PROJECT="MokaScreen.xcodeproj"
 TEAM_ID="G3RSHR4W5U"
 NOTARY_PROFILE="${NOTARY_PROFILE:-mokarig-notary}"
 NOTARIZE="${NOTARIZE:-1}"
-OUT_DIR="$HOME/MokaScreenReleases"
+OUT_DIR="$HOME/MokaScreenReleases/Builds"
 BUILD_DIR="build/release"
 
 VERSION=$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Release -showBuildSettings 2>/dev/null \

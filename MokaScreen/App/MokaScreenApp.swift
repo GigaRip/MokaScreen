@@ -7,11 +7,20 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // -----------------------------------------------------------------------------
 
+import Sparkle
 import SwiftUI
 
 @main
 struct MokaScreenApp: App {
 	@State private var model = AppModel()
+
+	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
+	/// running; `startingUpdater: true` begins checking for updates at launch.
+	private let updaterController = SPUStandardUpdaterController(
+		startingUpdater: true,
+		updaterDelegate: nil,
+		userDriverDelegate: nil
+	)
 
 	var body: some Scene {
 		Window("MokaScreen", id: "main") {
@@ -23,6 +32,9 @@ struct MokaScreenApp: App {
 		.windowResizability(.contentSize)
 		.defaultSize(width: 560, height: 520)
 		.commands {
+			CommandGroup(after: .appInfo) {
+				CheckForUpdatesView(updater: updaterController.updater)
+			}
 			CommandMenu("Develop") {
 				Button("Start Loopback Test") { model.startLoopback() }
 					.disabled(model.isLoopback)

@@ -131,8 +131,22 @@ sides in one process over loopback, with the received display in a window.
 
 ### Releasing
 
-`./build-release.sh` archives, signs with Developer ID, notarizes, staples, and
-zips the app into `~/MokaScreenReleases`.
+`./release.sh <x.y.z>` publishes a release, the same way MokaRig does. From a
+clean, pushed checkout, it:
+
+1. archives, signs with Developer ID, and builds a DMG;
+2. notarizes and staples the DMG;
+3. uploads it to the `mokascreen-downloads` R2 bucket as `MokaScreen-<x.y.z>.dmg`
+	and as the stable `MokaScreen.dmg` that mokascreen.com links to;
+4. renders `ReleaseNotes/<x.y.z>.md` and publishes a signed Sparkle `appcast.xml`,
+	which installed copies check for updates;
+5. tags the commit `v<x.y.z>`.
+
+With no version, it releases the next patch after the published one. Write the
+release notes first; the script refuses to run without them.
+
+`./build-release.sh` makes a notarized zip in `~/MokaScreenReleases/Builds` for
+trying a build on another Mac without publishing it.
 
 ## License
 
