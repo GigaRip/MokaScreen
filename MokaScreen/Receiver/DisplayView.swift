@@ -65,11 +65,13 @@ final class MetalLayerView: NSView {
 /// arrival removes the wait for the tick and lets ProMotion refresh the panel as soon as the frame
 /// is ready.
 ///
-/// Up to two drawables are in flight; frames that arrive while both are in flight are folded
-/// into the next draw instead of queuing behind them. Presenting on arrival does not by itself
+/// Up to two drawables are in flight, three under Smooth Motion, which holds each one until its
+/// paced glass time; frames that arrive while the limit is reached are folded into the next draw
+/// instead of queuing behind them. Presenting on arrival does not by itself
 /// tell macOS what refresh rate the screen needs; ``RefreshRateRequest`` does.
 final class PresentationDriver {
 	static let maxInFlight = 2
+	static let maxInFlightPaced = 3
 	/// How long to wait for a drawable to be reported presented before drawing anyway, so a report
 	/// that never comes cannot freeze the screen.
 	private static let presentTimeout: TimeInterval = 0.1
@@ -124,12 +126,13 @@ final class PresentationDriver {
 		}
 	}
 
-	/// Waits until fewer than ``maxInFlight`` drawables are in flight, or the timeout passes.
-	/// Returns false once stopped.
+	/// Waits until fewer than ``maxInFlight`` (or ``maxInFlightPaced``) drawables are in flight,
+	/// or the timeout passes. Returns false once stopped.
 	private func waitForRoom() -> Bool {
-		condition.withLock {
+		let limit = renderer.smoothMotion ? Self.maxInFlightPaced : Self.maxInFlight
+		return condition.withLock {
 			let deadline = Date(timeIntervalSinceNow: Self.presentTimeout)
-			while inFlight >= Self.maxInFlight, !stopped {
+			while inFlight >= limit, !stopped {
 				if !condition.wait(until: deadline) {
 					inFlight = 0
 					epoch &+= 1

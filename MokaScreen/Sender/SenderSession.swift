@@ -73,7 +73,7 @@ final class SenderSession {
 	@ObservationIgnored private var displayGeneration = 0
 	@ObservationIgnored private let senderStats = SenderStats()
 	@ObservationIgnored private let link = CaptureLink()
-	@ObservationIgnored private var statisticsSync: StatisticsSync!
+	@ObservationIgnored private var settingsSync: SettingsSync!
 	/// The last minute of per-second statistics while connected, oldest first.
 	private(set) var history: [SenderSnapshot] = []
 	/// The virtual display's size in pixels, such as "3456 × 2234", while it exists.
@@ -83,7 +83,7 @@ final class SenderSession {
 		shape = UserDefaults.standard.string(forKey: "displayShape").flatMap(DisplayShape.init) ?? .fullPanel
 		preferredReceiver = UserDefaults.standard.string(forKey: "preferredReceiver")
 		receiverPanel = UserDefaults.standard.data(forKey: "receiverPanel").flatMap { try? JSONDecoder().decode(PanelGeometry.self, from: $0) } ?? .macBookPro16
-		statisticsSync = StatisticsSync { [link] visible in link.sendStatistics(visible) }
+		settingsSync = SettingsSync(send: { [link] settings in link.sendSettings(settings) })
 	}
 
 	var isRunning: Bool { status != .stopped }
@@ -346,8 +346,8 @@ final class SenderSession {
 		}
 
 		let closed = AsyncStream<Error>.makeStream()
-		let sender = FrameSender(stream: stream, width: size.width, height: size.height, stats: senderStats, showsStatistics: StatisticsPreference.isOn, onStatistics: { [weak self] visible in
-			Task { @MainActor in self?.statisticsSync.receive(visible) }
+		let sender = FrameSender(stream: stream, width: size.width, height: size.height, stats: senderStats, settings: SharedSettings.current, onSettings: { [weak self] settings in
+			Task { @MainActor in self?.settingsSync.receive(settings) }
 		}) { error in
 			closed.continuation.yield(error)
 			closed.continuation.finish()
@@ -456,8 +456,8 @@ private final class CaptureLink: @unchecked Sendable {
 		lock.withLock { latest = nil }
 	}
 
-	/// Forwards a Show Statistics change to the receiver, if connected.
-	func sendStatistics(_ visible: Bool) {
-		lock.withLock { sender }?.sendStatistics(visible: visible)
+	/// Forwards a settings change to the receiver, if connected.
+	func sendSettings(_ settings: SharedSettings) {
+		lock.withLock { sender }?.sendSettings(settings)
 	}
 }

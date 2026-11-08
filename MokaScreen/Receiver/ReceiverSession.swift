@@ -50,12 +50,14 @@ final class ReceiverSession {
 	@ObservationIgnored private var screenObserver: NSObjectProtocol?
 	@ObservationIgnored private var presentation: Presentation = .fullScreen
 	@ObservationIgnored private let receiverStats = ReceiverStats()
-	@ObservationIgnored private var statisticsSync: StatisticsSync!
+	@ObservationIgnored private var settingsSync: SettingsSync!
 
 	init() {
-		statisticsSync = StatisticsSync { [weak self] visible in
-			self?.connection?.receiver.sendStatistics(visible: visible)
-		}
+		settingsSync = SettingsSync(send: { [weak self] settings in
+			self?.connection?.receiver.sendSettings(settings)
+		}, onChange: { [weak self] settings in
+			self?.connection?.renderer.smoothMotion = settings.smoothMotion
+		})
 	}
 
 	/// Everything that exists for one sender's connection.
@@ -193,8 +195,8 @@ final class ReceiverSession {
 				guard let self, self.connection === connection else { return }
 				self.show(connection, peer: stream.peerDescription, hello: hello)
 			}
-		}, onStatistics: { [weak self] visible in
-			Task { @MainActor in self?.statisticsSync.receive(visible) }
+		}, onSettings: { [weak self] settings in
+			Task { @MainActor in self?.settingsSync.receive(settings) }
 		}, onClose: { [weak self] error in
 			Log.transport.info("Sender disconnected: \(String(describing: error), privacy: .public)")
 			Task { @MainActor in
@@ -203,6 +205,7 @@ final class ReceiverSession {
 			}
 		})
 		connection = Connection(receiver: receiver, renderer: renderer)
+		renderer.smoothMotion = SmoothMotionPreference.isOn
 		renderer.onPresented = { [weak receiver] frameID, glassTime in
 			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)
 		}
@@ -241,6 +244,7 @@ final class ReceiverSession {
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
 
+		connection.renderer.refreshInterval = 1 / Double(max(60, window.screen?.maximumFramesPerSecond ?? 120))
 		let driver = PresentationDriver(layer: view.metalLayer, renderer: connection.renderer)
 		driver.start()
 		connection.window = window

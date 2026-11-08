@@ -44,12 +44,17 @@ struct SenderSnapshot: Equatable {
 	/// The display Mac's rolling median from a frame's last byte arriving to its draw starting,
 	/// in milliseconds, from its last report.
 	var displayWait = 0.0
+	/// Uneven and compared frames per second on the display Mac, from its last pace report.
+	var displayUnevenPerSecond = 0.0
+	var displayComparedPerSecond = 0.0
+	/// Smooth Motion's delay on the display Mac in milliseconds; zero while it is off.
+	var displayPacing = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
 	var gigabitsPerSecond: Double { interval > 0 ? Double(bytes) * 8 / interval / 1e9 : 0 }
 
-	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms"
+	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms,display_uneven_per_s,display_compared_per_s,display_pacing_ms"
 
 	func csvRow(at date: Date) -> String {
 		let rectsPerFrame = sentFrames > 0 ? Double(rects) / Double(sentFrames) : 0
@@ -63,6 +68,7 @@ struct SenderSnapshot: Equatable {
 			String(format: "%.2f", recentLatency),
 			String(format: "%.2f", displayDelay), String(format: "%.2f", displayDelayP99), String(format: "%.1f", displayPresentedFPS),
 			String(format: "%.1f", displayDrawsPerSecond), String(format: "%.2f", displayWait),
+			String(format: "%.1f", displayUnevenPerSecond), String(format: "%.1f", displayComparedPerSecond), String(format: "%.2f", displayPacing),
 		].joined(separator: ",")
 	}
 }
@@ -75,6 +81,7 @@ final class SenderStats: @unchecked Sendable {
 	private var latencies: [Double] = []
 	private var recent = RecentLatencies()
 	private var displayReport: DisplayReportMessage?
+	private var paceReport: PaceReportMessage?
 	private var since = Date()
 
 	/// Frames behind ``SenderSnapshot/recentLatency``.
@@ -114,12 +121,18 @@ final class SenderStats: @unchecked Sendable {
 		lock.withLock { displayReport = report }
 	}
 
+	/// Keeps the display Mac's latest pace report for the next snapshot.
+	func recordPaceReport(_ report: PaceReportMessage) {
+		lock.withLock { paceReport = report }
+	}
+
 	/// Forgets the recent latencies and the display Mac's report, so a new connection is not
 	/// judged by the previous one.
 	func resetRecent() {
 		lock.withLock {
 			recent.removeAll()
 			displayReport = nil
+			paceReport = nil
 		}
 	}
 
@@ -142,6 +155,12 @@ final class SenderStats: @unchecked Sendable {
 				snapshot.displayDrawsPerSecond = report.intervalMillis > 0 ? Double(report.draws) * 1000 / Double(report.intervalMillis) : 0
 				snapshot.displayWait = Double(report.waitP50Micros) / 1000
 			}
+			if let report = paceReport, report.intervalMillis > 0 {
+				let seconds = Double(report.intervalMillis) / 1000
+				snapshot.displayUnevenPerSecond = Double(report.unevenFrames) / seconds
+				snapshot.displayComparedPerSecond = Double(report.comparedFrames) / seconds
+				snapshot.displayPacing = Double(report.pacingMicros) / 1000
+			}
 			current = SenderSnapshot()
 			coverageSum = 0
 			latencies.removeAll(keepingCapacity: true)
@@ -162,6 +181,13 @@ struct ReceiverSnapshot: Equatable {
 	/// Median over the most recent frames from the last byte arriving to the draw starting, in
 	/// milliseconds, held while the screen is idle.
 	var recentWait = 0.0
+	/// Consecutive frames whose spacing on the glass differed from their spacing at capture by
+	/// more than half a refresh, out of ``comparedFrames``.
+	var unevenFrames = 0
+	/// Consecutive frames captured less than three refreshes apart, so compared for evenness.
+	var comparedFrames = 0
+	/// Smooth Motion's current delay in milliseconds; zero while it is off.
+	var pacing = 0.0
 	/// Last byte received → frame handed to the display, in milliseconds.
 	var presentDelayP50 = 0.0
 	var presentDelayP99 = 0.0
@@ -181,6 +207,9 @@ final class ReceiverStats: @unchecked Sendable {
 	private var delays: [Double] = []
 	private var recent = RecentLatencies()
 	private var recentWaits = RecentLatencies()
+	private var pacing = 0.0
+	/// Capture and glass time of the last frame put on glass, for judging the next one's spacing.
+	private var lastGlass: (capture: UInt64, glass: UInt64)?
 	private var since = Date()
 
 	func recordReceived(bytes: Int) {
@@ -212,11 +241,33 @@ final class ReceiverStats: @unchecked Sendable {
 		}
 	}
 
+	/// Records Smooth Motion's current delay; zero while it is off.
+	func recordPacing(milliseconds: Double) {
+		lock.withLock { pacing = milliseconds }
+	}
+
+	/// Compares a frame's spacing on the glass with its spacing at capture, against the one
+	/// before it. All times in nanoseconds; capture times are on the sender's clock.
+	func recordGlass(captureTime: UInt64, glassTime: UInt64, refreshNanos: UInt64) {
+		lock.withLock {
+			defer { lastGlass = (captureTime, glassTime) }
+			guard let last = lastGlass, captureTime > last.capture, glassTime >= last.glass else { return }
+			let captured = Int64(captureTime - last.capture)
+			guard captured < Int64(refreshNanos * 3) else { return }
+			current.comparedFrames += 1
+			let shown = Int64(glassTime - last.glass)
+			if abs(shown - captured) > Int64(refreshNanos / 2) {
+				current.unevenFrames += 1
+			}
+		}
+	}
+
 	/// Forgets the recent delays, so a new connection is not judged by the previous one.
 	func resetRecent() {
 		lock.withLock {
 			recent.removeAll()
 			recentWaits.removeAll()
+			lastGlass = nil
 		}
 	}
 
@@ -230,6 +281,7 @@ final class ReceiverStats: @unchecked Sendable {
 			snapshot.presentDelayP99 = Percentile.of(sorted, 0.99)
 			(snapshot.recentDelay, snapshot.recentDelayP99) = recent.percentiles()
 			snapshot.recentWait = recentWaits.percentiles().p50
+			snapshot.pacing = pacing
 			current = ReceiverSnapshot()
 			delays.removeAll(keepingCapacity: true)
 			since = now

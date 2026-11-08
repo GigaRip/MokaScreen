@@ -44,6 +44,9 @@ struct WindowSnapshotTests {
 			snapshot.displayPresentedFPS = busy ? 118 : 0
 			snapshot.displayDrawsPerSecond = busy ? 117 : 0
 			snapshot.displayWait = busy ? 0.4 : 0
+			snapshot.displayUnevenPerSecond = busy ? 1 : 0
+			snapshot.displayComparedPerSecond = busy ? 117 : 0
+			snapshot.displayPacing = busy ? 3.5 : 0
 			history.append(snapshot)
 		}
 		let senderStates: [(String, SenderSession.Status, Int?, [SenderSnapshot])] = [

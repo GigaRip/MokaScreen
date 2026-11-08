@@ -18,9 +18,10 @@ import Foundation
 /// A session is: sender → `hello`, receiver → `helloAck`, then the sender
 /// streams frames (`frameBegin` followed by exactly `rectCount` × `rect`) while
 /// the receiver reports each frame it puts on glass with `presented`. Either side
-/// may send `statistics` between frames to change the other's Show Statistics
-/// setting; the sender sends its own right after the handshake. While showing,
-/// the receiver sends a `displayReport` once a second with its share of the delay. A side ignores a
+/// may send `settings` between frames to change the other's Show Statistics and
+/// Smooth Motion settings; the sender sends its own right after the handshake.
+/// While showing, the receiver sends a `displayReport` and a `paceReport` once a
+/// second with its share of the delay and how evenly frames reach the glass. A side ignores a
 /// header type it does not know, outside a frame, so a later message type that
 /// carries no payload does not need a version change.
 enum Wire {
@@ -47,8 +48,9 @@ enum MessageType: UInt32 {
 	case frameBegin = 3
 	case rect = 4
 	case presented = 5
-	case statistics = 6
+	case settings = 6
 	case displayReport = 7
+	case paceReport = 8
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -136,7 +138,8 @@ struct HelloAckMessage: Equatable {
 /// Sender → receiver: starts a frame made of `rectCount` disjoint rectangles.
 struct FrameBeginMessage: Equatable {
 	var frameID: UInt64
-	/// Sender host time (nanoseconds) at which the frame was captured. Only meaningful to the sender.
+	/// Sender host time (nanoseconds) at which the frame was captured. The two Macs' clocks are
+	/// unrelated, so the receiver uses only differences between these.
 	var captureTime: UInt64
 	var rectCount: UInt32
 
@@ -226,19 +229,69 @@ struct PresentedMessage: Equatable {
 	}
 }
 
-/// Either direction: show or hide the statistics panels, so both Macs follow one setting.
-struct StatisticsMessage: Equatable {
-	var visible: Bool
+/// Either direction: the settings both Macs share, so changing one on either Mac changes both.
+/// Flags at offset 4: bit 0 Show Statistics, bit 1 Smooth Motion.
+struct SettingsMessage: Equatable {
+	var settings: SharedSettings
 
 	func encode(into p: UnsafeMutableRawPointer) {
 		WireHeader.clear(p)
-		WireHeader.store(MessageType.statistics.rawValue, p, 0)
-		WireHeader.store(UInt32(visible ? 1 : 0), p, 4)
+		WireHeader.store(MessageType.settings.rawValue, p, 0)
+		WireHeader.store(UInt32(settings.showsStatistics ? 1 : 0) | UInt32(settings.smoothMotion ? 2 : 0), p, 4)
 	}
 
-	static func decode(_ p: UnsafeRawPointer) throws -> StatisticsMessage {
-		try WireHeader.expect(.statistics, p)
-		return StatisticsMessage(visible: WireHeader.load32(p, 4) != 0)
+	static func decode(_ p: UnsafeRawPointer) throws -> SettingsMessage {
+		try WireHeader.expect(.settings, p)
+		let flags = WireHeader.load32(p, 4)
+		return SettingsMessage(settings: SharedSettings(showsStatistics: flags & 1 != 0, smoothMotion: flags & 2 != 0))
+	}
+}
+
+/// Receiver → sender, once a second while showing: how evenly frames reached the glass.
+struct PaceReportMessage: Equatable {
+	/// Consecutive frames whose spacing on the glass differed from their spacing at capture by
+	/// more than half a refresh, over `intervalMillis`.
+	var unevenFrames: UInt32
+	/// Consecutive frames compared over `intervalMillis`: those captured less than three
+	/// refreshes apart, so a pause in the picture is not counted as unevenness.
+	var comparedFrames: UInt32
+	/// Smooth Motion's current delay, in microseconds; zero while it is off.
+	var pacingMicros: UInt32
+	var intervalMillis: UInt32
+
+	init(unevenFrames: UInt32, comparedFrames: UInt32, pacingMicros: UInt32, intervalMillis: UInt32) {
+		self.unevenFrames = unevenFrames
+		self.comparedFrames = comparedFrames
+		self.pacingMicros = pacingMicros
+		self.intervalMillis = intervalMillis
+	}
+
+	init(_ snapshot: ReceiverSnapshot) {
+		self.init(
+			unevenFrames: UInt32(clamping: snapshot.unevenFrames),
+			comparedFrames: UInt32(clamping: snapshot.comparedFrames),
+			pacingMicros: UInt32(clamping: Int((snapshot.pacing * 1000).rounded())),
+			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded()))
+		)
+	}
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.paceReport.rawValue, p, 0)
+		WireHeader.store(unevenFrames, p, 4)
+		WireHeader.store(comparedFrames, p, 8)
+		WireHeader.store(pacingMicros, p, 12)
+		WireHeader.store(intervalMillis, p, 16)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> PaceReportMessage {
+		try WireHeader.expect(.paceReport, p)
+		return PaceReportMessage(
+			unevenFrames: WireHeader.load32(p, 4),
+			comparedFrames: WireHeader.load32(p, 8),
+			pacingMicros: WireHeader.load32(p, 12),
+			intervalMillis: WireHeader.load32(p, 16)
+		)
 	}
 }
 

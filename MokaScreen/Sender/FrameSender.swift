@@ -29,30 +29,30 @@ final class FrameSender {
 	private let stats: SenderStats
 	private let condition = NSCondition()
 	private var pending: CapturedFrame?
-	/// A Show Statistics change waiting to go out ahead of the next frame.
-	private var pendingStatistics: Bool?
+	/// A settings change waiting to go out ahead of the next frame.
+	private var pendingSettings: SharedSettings?
 	private var dirty: DirtyRegion
 	private var running = true
 	private var nextFrameID: UInt64 = 1
 	private let onClose: (Error) -> Void
-	private let onStatistics: (Bool) -> Void
+	private let onSettings: (SharedSettings) -> Void
 	/// Capture time of each recent frame, so `presented` acknowledgements yield latency.
 	private let inflight = InflightFrames()
 
 	/// Starts the send and acknowledgement threads on a stream that has completed the handshake.
 	/// - Parameters:
-	///   - showsStatistics: This Mac's Show Statistics setting, sent before the first frame so
-	///     the receiver starts out matching it.
-	///   - onStatistics: Called from a background thread when the receiver changes the setting.
+	///   - settings: This Mac's shared settings, sent before the first frame so the receiver
+	///     starts out matching them.
+	///   - onSettings: Called from a background thread when the receiver changes a setting.
 	///   - onClose: Called once, from a background thread, when the connection fails.
-	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, showsStatistics: Bool, onStatistics: @escaping (Bool) -> Void, onClose: @escaping (Error) -> Void) {
+	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, settings: SharedSettings, onSettings: @escaping (SharedSettings) -> Void, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.width = width
 		self.height = height
 		self.stats = stats
-		self.onStatistics = onStatistics
+		self.onSettings = onSettings
 		self.onClose = onClose
-		pendingStatistics = showsStatistics
+		pendingSettings = settings
 		dirty = DirtyRegion(width: width, height: height)
 		dirty.insertAll()
 
@@ -81,11 +81,11 @@ final class FrameSender {
 		condition.unlock()
 	}
 
-	/// Tells the receiver to show or hide its statistics. Thread-safe; the message goes out on the
-	/// send thread so it never lands inside a frame.
-	func sendStatistics(visible: Bool) {
+	/// Sends the shared settings to the receiver. Thread-safe; the message goes out on the send
+	/// thread so it never lands inside a frame.
+	func sendSettings(_ settings: SharedSettings) {
 		condition.lock()
-		pendingStatistics = visible
+		pendingSettings = settings
 		condition.signal()
 		condition.unlock()
 	}
@@ -110,14 +110,14 @@ final class FrameSender {
 
 		while true {
 			condition.lock()
-			while running && pendingStatistics == nil && (pending == nil || dirty.isEmpty) {
+			while running && pendingSettings == nil && (pending == nil || dirty.isEmpty) {
 				condition.wait()
 			}
-			if running, let visible = pendingStatistics {
-				pendingStatistics = nil
+			if running, let settings = pendingSettings {
+				pendingSettings = nil
 				condition.unlock()
 				do {
-					try stream.writeHeader { StatisticsMessage(visible: visible).encode(into: $0) }
+					try stream.writeHeader { SettingsMessage(settings: settings).encode(into: $0) }
 				} catch {
 					fail(error)
 					return
@@ -209,10 +209,12 @@ final class FrameSender {
 						let arrival = Double(HostClock.now &- captureTime) / 1e9
 						stats.recordPresented(latency: arrival + Double(presented.glassOffsetMicros) / 1e6)
 					}
-				case .statistics(let statistics):
-					onStatistics(statistics.visible)
+				case .settings(let message):
+					onSettings(message.settings)
 				case .displayReport(let report):
 					stats.recordDisplayReport(report)
+				case .paceReport(let report):
+					stats.recordPaceReport(report)
 				case .unknown:
 					break
 				}
@@ -239,15 +241,17 @@ final class FrameSender {
 /// A message from the receiver.
 private enum ReceiverMessage {
 	case presented(PresentedMessage)
-	case statistics(StatisticsMessage)
+	case settings(SettingsMessage)
 	case displayReport(DisplayReportMessage)
+	case paceReport(PaceReportMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
 		switch MessageType(rawValue: WireHeader.type(p)) {
 		case .presented: .presented(try PresentedMessage.decode(p))
-		case .statistics: .statistics(try StatisticsMessage.decode(p))
+		case .settings: .settings(try SettingsMessage.decode(p))
 		case .displayReport: .displayReport(try DisplayReportMessage.decode(p))
+		case .paceReport: .paceReport(try PaceReportMessage.decode(p))
 		default: .unknown
 		}
 	}

@@ -19,10 +19,15 @@ struct WireTests {
 		return try decode(buffer)
 	}
 
-	@Test(arguments: [true, false])
-	func statisticsRoundTrips(visible: Bool) throws {
-		let message = StatisticsMessage(visible: visible)
-		#expect(try roundTrip(message.encode, StatisticsMessage.decode) == message)
+	@Test(arguments: [(false, false), (true, false), (false, true), (true, true)])
+	func settingsRoundTrip(flags: (Bool, Bool)) throws {
+		let message = SettingsMessage(settings: SharedSettings(showsStatistics: flags.0, smoothMotion: flags.1))
+		#expect(try roundTrip(message.encode, SettingsMessage.decode) == message)
+	}
+
+	@Test func paceReportRoundTrips() throws {
+		let report = PaceReportMessage(unevenFrames: 7, comparedFrames: 109, pacingMicros: 4_250, intervalMillis: 1002)
+		#expect(try roundTrip(report.encode, PaceReportMessage.decode) == report)
 	}
 
 	@Test func presentedCarriesASignedGlassOffset() throws {

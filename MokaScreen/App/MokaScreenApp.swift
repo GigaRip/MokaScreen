@@ -15,6 +15,7 @@ import SwiftUI
 struct MokaScreenApp: App {
 	@State private var model = AppModel()
 	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
+	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = false
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
 	/// running; `startingUpdater: true` begins checking for updates at launch.
@@ -43,6 +44,8 @@ struct MokaScreenApp: App {
 					.disabled(model.isLoopback)
 				Toggle("Show Statistics", isOn: $showsStatistics)
 					.keyboardShortcut("s", modifiers: [.command, .option])
+				Toggle("Smooth Motion", isOn: $smoothMotion)
+					.keyboardShortcut("m", modifiers: [.command, .option])
 				Button("Show Latency Clock") { LatencyClock.toggle() }
 					.keyboardShortcut("l", modifiers: [.command, .option])
 				Divider()
@@ -67,34 +70,69 @@ enum StatisticsPreference {
 	}
 }
 
-/// Keeps Show Statistics the same on both Macs while they are connected: a change on this Mac
+/// Whether the display Mac paces frames to their capture times. Kept in user defaults like
+/// ``StatisticsPreference``.
+enum SmoothMotionPreference {
+	static let key = "smoothMotion"
+
+	static var isOn: Bool {
+		get { UserDefaults.standard.bool(forKey: key) }
+		set { UserDefaults.standard.set(newValue, forKey: key) }
+	}
+}
+
+/// The settings both Macs keep the same while connected.
+struct SharedSettings: Equatable {
+	var showsStatistics: Bool
+	var smoothMotion: Bool
+
+	/// This Mac's settings, from user defaults.
+	static var current: SharedSettings {
+		get { SharedSettings(showsStatistics: StatisticsPreference.isOn, smoothMotion: SmoothMotionPreference.isOn) }
+		set {
+			StatisticsPreference.isOn = newValue.showsStatistics
+			SmoothMotionPreference.isOn = newValue.smoothMotion
+		}
+	}
+}
+
+/// Keeps ``SharedSettings`` the same on both Macs while they are connected: a change on this Mac
 /// is sent to the other, and one received from it is applied here without being sent back.
 @MainActor
-final class StatisticsSync {
+final class SettingsSync {
 	private var observer: NSObjectProtocol?
-	/// The value last sent or received, so applying a received change does not echo it back.
-	private var lastSeen = StatisticsPreference.isOn
-	private let send: (Bool) -> Void
+	/// The settings last sent or received, so applying a received change does not echo it back.
+	private var lastSeen = SharedSettings.current
+	private let send: (SharedSettings) -> Void
+	private let onChange: (SharedSettings) -> Void
 
-	/// - Parameter send: Sends a change to the other Mac; does nothing when not connected.
-	init(send: @escaping (Bool) -> Void) {
+	/// - Parameters:
+	///   - send: Sends a change to the other Mac; does nothing when not connected.
+	///   - onChange: Called after any change, made here or received.
+	init(send: @escaping (SharedSettings) -> Void, onChange: @escaping (SharedSettings) -> Void = { _ in }) {
 		self.send = send
+		self.onChange = onChange
 		observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
 			MainActor.assumeIsolated { self?.localChange() }
 		}
 	}
 
-	/// Applies the other Mac's setting here.
-	func receive(_ visible: Bool) {
-		lastSeen = visible
-		StatisticsPreference.isOn = visible
+	/// Applies the other Mac's settings here.
+	func receive(_ settings: SharedSettings) {
+		let changed = settings != lastSeen
+		lastSeen = settings
+		SharedSettings.current = settings
+		if changed {
+			onChange(settings)
+		}
 	}
 
 	private func localChange() {
-		let visible = StatisticsPreference.isOn
-		guard visible != lastSeen else { return }
-		lastSeen = visible
-		send(visible)
+		let settings = SharedSettings.current
+		guard settings != lastSeen else { return }
+		lastSeen = settings
+		send(settings)
+		onChange(settings)
 	}
 }
 

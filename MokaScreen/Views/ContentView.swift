@@ -138,8 +138,17 @@ struct SenderStatsView: View {
 		StatRow("Sent", String(format: "%.0f fps  ·  %.2f Gbps", stats.sentFPS, stats.gigabitsPerSecond))
 		StatRow("Shown on the display Mac", stats.displayPresentedFPS > 0 ? String(format: "%.0f fps", stats.displayPresentedFPS) : "—")
 		StatRow("Drawn on the display Mac", stats.displayDrawsPerSecond > 0 ? String(format: "%.0f times a second  ·  %.1f ms wait", stats.displayDrawsPerSecond, stats.displayWait) : "—")
+		StatRow("Uneven frames", unevenFrames)
 		StatRow("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100))
 		StatRow("Superseded", "\(stats.supersededFrames) frames")
+	}
+
+	/// How many frames a second reached the display Mac's glass unevenly, and Smooth Motion's
+	/// delay when it is on.
+	private var unevenFrames: String {
+		let motion = stats.displayPacing > 0 ? String(format: "Smooth Motion +%.1f ms", stats.displayPacing) : "Smooth Motion off"
+		guard stats.displayComparedPerSecond > 0 else { return stats.displayPacing > 0 ? motion : "—" }
+		return String(format: "%.0f of %.0f a second  ·  ", stats.displayUnevenPerSecond, stats.displayComparedPerSecond) + motion
 	}
 }
 

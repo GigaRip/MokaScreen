@@ -46,6 +46,19 @@ final class FrameRenderer: FrameSink {
 	private var pending: [ReceivedFrame] = []
 	private var needsRedraw = true
 	private var shuttingDown = false
+	private var pacesFrames = false
+	/// Render thread only.
+	private var pacer = FramePacer()
+
+	/// Whether frames are presented at their paced glass time rather than as soon as they are
+	/// drawn. Thread-safe; takes effect from the next draw.
+	var smoothMotion: Bool {
+		get { lock.withLock { pacesFrames } }
+		set { lock.withLock { pacesFrames = newValue } }
+	}
+
+	/// The panel's refresh interval in seconds, for judging whether frames reach the glass evenly.
+	var refreshInterval: Double = 1.0 / 120
 
 	/// Called from a Metal thread with the newest frame ID and its glass time, in host
 	/// nanoseconds, each time a drawable is presented.
@@ -219,6 +232,7 @@ final class FrameRenderer: FrameSink {
 		let redraw = needsRedraw
 		needsRedraw = false
 		let surface = surface
+		let pacesFrames = pacesFrames
 		lock.unlock()
 
 		guard let surface, !frames.isEmpty || redraw,
@@ -236,6 +250,10 @@ final class FrameRenderer: FrameSink {
 		surface.hasContent = true
 		let receivedTimes = current.map(\.receivedTime)
 		stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
+		for frame in current {
+			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
+		}
+		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.delay) / 1e6 : 0)
 		if !current.isEmpty, let blit = commandBuffer.makeBlitCommandEncoder() {
 			for frame in current {
 				let buffer = frame.slot.owner as! MTLBuffer
@@ -271,9 +289,10 @@ final class FrameRenderer: FrameSink {
 			encoder.endEncoding()
 		}
 
-		let newest = current.last?.frameID
+		let newest = current.last
 		let stats = stats
 		let onPresented = onPresented
+		let refreshNanos = UInt64(refreshInterval * 1e9)
 		drawable.addPresentedHandler { drawable in
 			defer { whenShown() }
 			let presented = drawable.presentedTime
@@ -282,9 +301,15 @@ final class FrameRenderer: FrameSink {
 			for received in receivedTimes {
 				stats.recordPresented(delay: Double(presentedNanos &- received) / 1e9)
 			}
-			onPresented?(newest, presentedNanos)
+			stats.recordGlass(captureTime: newest.captureTime, glassTime: presentedNanos, refreshNanos: refreshNanos)
+			onPresented?(newest.frameID, presentedNanos)
 		}
-		commandBuffer.present(drawable)
+		// Smooth Motion holds a frame until its paced glass time; one already due goes at once.
+		if pacesFrames, let newest, let glass = pacer.glassTime(captureTime: newest.captureTime), glass > HostClock.now &+ 1_000_000 {
+			commandBuffer.present(drawable, atTime: Double(glass) / 1e9)
+		} else {
+			commandBuffer.present(drawable)
+		}
 		let slots = frames.map(\.slot)
 		commandBuffer.addCompletedHandler { [weak self] _ in
 			self?.release(slots)

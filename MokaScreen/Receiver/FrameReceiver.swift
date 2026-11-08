@@ -39,6 +39,8 @@ struct ReceivedFrame {
 	var slot: FrameSlot
 	/// Host time (nanoseconds) at which the frame's last byte arrived.
 	var receivedTime: UInt64
+	/// Sender host time (nanoseconds) at which the frame was captured, on the sender's clock.
+	var captureTime: UInt64 = 0
 }
 
 /// Where the reader puts frames. The renderer implements it; tests use plain memory.
@@ -64,7 +66,7 @@ final class FrameReceiver {
 	private let sink: FrameSink
 	private let stats: ReceiverStats
 	private let onHello: (HelloMessage) -> Void
-	private let onStatistics: (Bool) -> Void
+	private let onSettings: (SharedSettings) -> Void
 	private let onClose: (Error) -> Void
 	private let ackQueue = DispatchQueue(label: "com.gigarip.mokascreen.ack", qos: .userInteractive)
 	private let ackLock = NSLock()
@@ -74,14 +76,14 @@ final class FrameReceiver {
 
 	/// - Parameters:
 	///   - onHello: Called on the reader thread once the sender is accepted.
-	///   - onStatistics: Called on the reader thread when the sender changes Show Statistics.
+	///   - onSettings: Called on the reader thread when the sender changes a shared setting.
 	///   - onClose: Called once on the reader thread when the stream ends or fails.
-	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, onHello: @escaping (HelloMessage) -> Void, onStatistics: @escaping (Bool) -> Void, onClose: @escaping (Error) -> Void) {
+	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, onHello: @escaping (HelloMessage) -> Void, onSettings: @escaping (SharedSettings) -> Void, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.sink = sink
 		self.stats = stats
 		self.onHello = onHello
-		self.onStatistics = onStatistics
+		self.onSettings = onSettings
 		self.onClose = onClose
 	}
 
@@ -131,11 +133,11 @@ final class FrameReceiver {
 		}
 	}
 
-	/// Tells the sender to show or hide its statistics. Thread-safe; written on the queue that
-	/// writes `presented`, so the two never interleave.
-	func sendStatistics(visible: Bool) {
+	/// Sends the shared settings to the sender. Thread-safe; written on the queue that writes
+	/// `presented`, so the two never interleave.
+	func sendSettings(_ settings: SharedSettings) {
 		ackQueue.async { [self] in
-			try? stream.writeHeader { StatisticsMessage(visible: visible).encode(into: $0) }
+			try? stream.writeHeader { SettingsMessage(settings: settings).encode(into: $0) }
 		}
 	}
 
@@ -143,8 +145,10 @@ final class FrameReceiver {
 	/// `presented`.
 	func sendReport(_ snapshot: ReceiverSnapshot) {
 		let report = DisplayReportMessage(snapshot)
+		let pace = PaceReportMessage(snapshot)
 		ackQueue.async { [self] in
 			try? stream.writeHeader { report.encode(into: $0) }
+			try? stream.writeHeader { pace.encode(into: $0) }
 		}
 	}
 
@@ -162,8 +166,8 @@ final class FrameReceiver {
 			switch try stream.readHeader(SenderMessage.decode) {
 			case .frameBegin(let message):
 				begin = message
-			case .statistics(let message):
-				onStatistics(message.visible)
+			case .settings(let message):
+				onSettings(message.settings)
 				continue
 			case .unknown:
 				continue
@@ -186,7 +190,7 @@ final class FrameReceiver {
 			}
 			stats.recordReceived(bytes: offset + Wire.headerSize * (1 + rects.count))
 			committed = true
-			sink.commit(ReceivedFrame(frameID: begin.frameID, rects: rects, slot: slot, receivedTime: HostClock.now))
+			sink.commit(ReceivedFrame(frameID: begin.frameID, rects: rects, slot: slot, receivedTime: HostClock.now, captureTime: begin.captureTime))
 		}
 	}
 }
@@ -194,15 +198,15 @@ final class FrameReceiver {
 /// A message from the sender between frames.
 private enum SenderMessage {
 	case frameBegin(FrameBeginMessage)
-	case statistics(StatisticsMessage)
+	case settings(SettingsMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> SenderMessage {
 		switch MessageType(rawValue: WireHeader.type(p)) {
 		case .frameBegin: .frameBegin(try FrameBeginMessage.decode(p))
-		case .statistics: .statistics(try StatisticsMessage.decode(p))
+		case .settings: .settings(try SettingsMessage.decode(p))
 		// A rect outside a frame is a protocol error, not an unknown message.
-		case .rect, .hello, .helloAck, .presented, .displayReport: throw WireError.unexpectedMessage(WireHeader.type(p))
+		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport: throw WireError.unexpectedMessage(WireHeader.type(p))
 		case nil: .unknown
 		}
 	}
