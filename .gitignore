@@ -1,0 +1,19 @@
+# Xcode / Swift
+## User settings
+xcuserdata/
+*.xcuserstate
+
+## Build products & derived data
+build/
+DerivedData/
+*.moved-aside
+*.hmap
+*.dSYM.zip
+*.dSYM
+
+## Swift Package Manager
+.build/
+.swiftpm/
+
+## macOS
+.DS_Store
