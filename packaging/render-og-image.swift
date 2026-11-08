@@ -41,7 +41,7 @@ let title = NSAttributedString(string: "MokaScreen", attributes: [
 	.kern: -1.5,
 ])
 title.draw(at: NSPoint(x: 470, y: 330))
-let tagline = NSAttributedString(string: "Your second MacBook,\nas a 120 Hz display.", attributes: [
+let tagline = NSAttributedString(string: "Use a second MacBook\nas a 120 Hz display.", attributes: [
 	.font: NSFont.systemFont(ofSize: 40, weight: .regular),
 	.foregroundColor: muted,
 ])

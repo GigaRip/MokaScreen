@@ -13,13 +13,15 @@ driver, no kernel extension.
 
 ## Requirements
 
-- Two **MacBook Pro with M5 Pro or M5 Max**, 14-inch or 16-inch, in any combination.
+- Two **MacBook Pro with M4 Pro, M4 Max, M5 Pro, or M5 Max**, 14-inch or 16-inch, in
+	any combination.
 - **macOS Tahoe 26.2 or later** on both.
-- A **Thunderbolt 5 cable** between them.
+- A **Thunderbolt 4 or 5 cable** between them.
 
-A MacBook Pro with the base M5 chip has Thunderbolt 4. MokaScreen works over it, but
-whole-screen changes (switching Spaces, full-screen video) need more than Thunderbolt 4
-networking carries at 120 Hz, so those drop below 120 frames per second.
+Thunderbolt 5 is best. Over Thunderbolt 4 — a Thunderbolt 4 cable, or a MacBook Pro
+with the base M4 or M5 chip — the picture is just as sharp, but whole-screen changes
+(switching Spaces, full-screen video) need more than Thunderbolt 4 networking carries
+at 120 Hz, so those drop below 120 frames per second.
 
 ## Setting up the two Macs
 
