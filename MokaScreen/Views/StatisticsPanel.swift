@@ -23,8 +23,13 @@ struct StatisticsPanelContent {
 
 	/// What the large figure measures, such as "CAPTURE → ON GLASS".
 	var latencyLabel: String
-	/// Per-second latency, oldest first.
+	/// The rolling latency recorded once a second, oldest first, for the chart. Because the
+	/// rolling figure holds through idle seconds, the line runs on flat while nothing changes
+	/// instead of breaking, and ends at the large figure.
 	var history: [LatencySample]
+	/// The large figure: median and p99 over the most recent frames, which hold steady while
+	/// the screen is idle; nil before the first frame.
+	var current: LatencySample?
 	/// Label and value pairs listed under the chart.
 	var figures: [(String, String)]
 	var refreshRate: Int
@@ -44,7 +49,8 @@ extension StatisticsPanelContent {
 		if let source { figures.append(("SOURCE", source)) }
 		self.init(
 			latencyLabel: "ARRIVAL → ON GLASS",
-			history: history.map { LatencySample(p50: $0.presentDelayP50, p99: $0.presentDelayP99) },
+			history: history.map { LatencySample(p50: $0.recentDelay, p99: $0.recentDelayP99) },
+			current: stats.recentDelay > 0 ? LatencySample(p50: stats.recentDelay, p99: stats.recentDelayP99) : nil,
 			figures: figures,
 			refreshRate: refreshRate,
 			isLive: stats.receivedFrames > 0 || stats.presentedFrames > 0,
@@ -64,7 +70,8 @@ extension StatisticsPanelContent {
 		if let display { figures.append(("DISPLAY", display)) }
 		self.init(
 			latencyLabel: "CAPTURE → ON GLASS",
-			history: history.map { LatencySample(p50: $0.latencyP50, p99: $0.latencyP99) },
+			history: history.map { LatencySample(p50: $0.recentLatency, p99: $0.recentLatencyP99) },
+			current: stats.recentLatency > 0 ? LatencySample(p50: stats.recentLatency, p99: stats.recentLatencyP99) : nil,
 			figures: figures,
 			refreshRate: refreshRate,
 			isLive: stats.capturedFrames > 0 || stats.sentFrames > 0,
@@ -83,8 +90,7 @@ struct StatisticsPanel: View {
 	private var isLive: Bool { content.isLive }
 	private var refreshRate: Int { content.refreshRate }
 	private var history: [LatencySample] { content.history }
-	/// The latest second with a measurement, so an idle screen keeps showing the last reading.
-	private var latest: LatencySample? { history.last { $0.p50 > 0 } }
+	private var latest: LatencySample? { content.current }
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 16) {

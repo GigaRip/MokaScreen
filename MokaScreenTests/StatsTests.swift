@@ -34,6 +34,19 @@ struct StatsTests {
 		#expect(stats.drain().recentLatency == 8)
 	}
 
+	@Test func receiverRecentDelayMatchesTheSenderRules() {
+		let stats = ReceiverStats()
+		for ms in [5.0, 6.0, 40.0] {
+			stats.recordPresented(delay: ms / 1000)
+		}
+		let busy = stats.drain()
+		#expect(busy.recentDelay == 6)
+		#expect(busy.recentDelayP99 == 40)
+		#expect(stats.drain().recentDelay == 6)
+		stats.resetRecent()
+		#expect(stats.drain().recentDelay == 0)
+	}
+
 	@Test func resetForgetsRecentLatency() {
 		let stats = SenderStats()
 		stats.recordPresented(latency: 0.030)

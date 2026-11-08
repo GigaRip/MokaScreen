@@ -50,8 +50,10 @@ struct SenderView: View {
 			}
 
 			if showsStatistics {
+				// The rates and latency are in the floating statistics panel; the window keeps what
+				// the panel does not show.
 				InfoSection {
-					SenderStatsView(stats: session.stats)
+					StatRow("Superseded", "\(session.stats.supersededFrames) frames")
 					BridgeDetailRows(bridge: model.bridge)
 					InfoRow(label: "Record to a CSV file") {
 						Toggle("Record to a CSV file", isOn: $session.recordsStats)

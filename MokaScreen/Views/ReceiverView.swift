@@ -24,10 +24,9 @@ struct ReceiverView: View {
 			}
 
 			if showsStatistics {
+				// The rates and latency are in the overlay on the shared screen; the window keeps
+				// what the overlay does not show.
 				InfoSection {
-					StatRow("Received", String(format: "%.0f fps  ·  %.2f Gbps", session.stats.receivedFPS, session.stats.gigabitsPerSecond))
-					StatRow("Presented", String(format: "%.0f fps", session.stats.presentedFPS))
-					StatRow("Arrival → on glass", session.stats.presentDelayP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", session.stats.presentDelayP50, session.stats.presentDelayP99) : "—")
 					BridgeDetailRows(bridge: model.bridge)
 				}
 			}

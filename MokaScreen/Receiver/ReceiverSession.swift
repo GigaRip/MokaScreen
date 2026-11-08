@@ -191,6 +191,7 @@ final class ReceiverSession {
 			status = .failed(String(describing: error))
 			return
 		}
+		receiverStats.resetRecent()
 		var connection: Connection!
 		let receiver = FrameReceiver(stream: stream, sink: renderer, stats: receiverStats, onHello: { [weak self] hello in
 			Task { @MainActor in

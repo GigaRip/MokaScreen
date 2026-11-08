@@ -29,6 +29,8 @@ struct SenderSnapshot: Equatable {
 	/// milliseconds; 0 before the first. Unlike the per-second figures it holds its value while
 	/// the screen is idle, when only an occasional frame is sent.
 	var recentLatency = 0.0
+	/// 99th percentile over the same frames as ``recentLatency``.
+	var recentLatencyP99 = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
@@ -55,14 +57,11 @@ final class SenderStats: @unchecked Sendable {
 	private var current = SenderSnapshot()
 	private var coverageSum = 0.0
 	private var latencies: [Double] = []
-	/// The last ``recentCapacity`` latencies, oldest overwritten first.
-	private var recent: [Double] = []
-	private var recentNext = 0
+	private var recent = RecentLatencies()
 	private var since = Date()
 
-	/// Frames behind ``SenderSnapshot/recentLatency``: two seconds at 120 Hz, so a few slow
-	/// full-screen frames sent while idle do not swing it.
-	static let recentCapacity = 240
+	/// Frames behind ``SenderSnapshot/recentLatency``.
+	static let recentCapacity = RecentLatencies.capacity
 
 	func recordCaptured() {
 		lock.withLock { current.capturedFrames += 1 }
@@ -88,20 +87,14 @@ final class SenderStats: @unchecked Sendable {
 		lock.withLock {
 			let milliseconds = latency * 1000
 			latencies.append(milliseconds)
-			if recent.count < Self.recentCapacity {
-				recent.append(milliseconds)
-			} else {
-				recent[recentNext] = milliseconds
-			}
-			recentNext = (recentNext + 1) % Self.recentCapacity
+			recent.append(milliseconds)
 		}
 	}
 
 	/// Forgets the recent latencies, so a new connection is not judged by the previous one.
 	func resetRecent() {
 		lock.withLock {
-			recent.removeAll(keepingCapacity: true)
-			recentNext = 0
+			recent.removeAll()
 		}
 	}
 
@@ -116,7 +109,7 @@ final class SenderStats: @unchecked Sendable {
 			snapshot.latencyP50 = Percentile.of(sorted, 0.5)
 			snapshot.latencyP99 = Percentile.of(sorted, 0.99)
 			snapshot.latencyMax = sorted.last ?? 0
-			snapshot.recentLatency = Percentile.of(recent.sorted(), 0.5)
+			(snapshot.recentLatency, snapshot.recentLatencyP99) = recent.percentiles()
 			current = SenderSnapshot()
 			coverageSum = 0
 			latencies.removeAll(keepingCapacity: true)
@@ -135,6 +128,9 @@ struct ReceiverSnapshot: Equatable {
 	/// Last byte received → frame handed to the display, in milliseconds.
 	var presentDelayP50 = 0.0
 	var presentDelayP99 = 0.0
+	/// Median and 99th percentile over the most recent frames, held while the screen is idle.
+	var recentDelay = 0.0
+	var recentDelayP99 = 0.0
 
 	var receivedFPS: Double { interval > 0 ? Double(receivedFrames) / interval : 0 }
 	var presentedFPS: Double { interval > 0 ? Double(presentedFrames) / interval : 0 }
@@ -146,6 +142,7 @@ final class ReceiverStats: @unchecked Sendable {
 	private let lock = NSLock()
 	private var current = ReceiverSnapshot()
 	private var delays: [Double] = []
+	private var recent = RecentLatencies()
 	private var since = Date()
 
 	func recordReceived(bytes: Int) {
@@ -160,7 +157,13 @@ final class ReceiverStats: @unchecked Sendable {
 		lock.withLock {
 			current.presentedFrames += 1
 			delays.append(delay * 1000)
+			recent.append(delay * 1000)
 		}
+	}
+
+	/// Forgets the recent delays, so a new connection is not judged by the previous one.
+	func resetRecent() {
+		lock.withLock { recent.removeAll() }
 	}
 
 	func drain() -> ReceiverSnapshot {
@@ -171,11 +174,42 @@ final class ReceiverStats: @unchecked Sendable {
 			let sorted = delays.sorted()
 			snapshot.presentDelayP50 = Percentile.of(sorted, 0.5)
 			snapshot.presentDelayP99 = Percentile.of(sorted, 0.99)
+			(snapshot.recentDelay, snapshot.recentDelayP99) = recent.percentiles()
 			current = ReceiverSnapshot()
 			delays.removeAll(keepingCapacity: true)
 			since = now
 			return snapshot
 		}
+	}
+}
+
+/// The most recent latencies, in milliseconds, oldest overwritten first.
+///
+/// Their median is the headline latency: two seconds of frames at 120 Hz is enough that the
+/// occasional slow full-screen frame sent while the screen is idle does not swing it.
+struct RecentLatencies {
+	static let capacity = 240
+	private var values: [Double] = []
+	private var next = 0
+
+	mutating func append(_ milliseconds: Double) {
+		if values.count < Self.capacity {
+			values.append(milliseconds)
+		} else {
+			values[next] = milliseconds
+		}
+		next = (next + 1) % Self.capacity
+	}
+
+	mutating func removeAll() {
+		values.removeAll(keepingCapacity: true)
+		next = 0
+	}
+
+	/// Median and 99th percentile; zeros when empty.
+	func percentiles() -> (p50: Double, p99: Double) {
+		let sorted = values.sorted()
+		return (Percentile.of(sorted, 0.5), Percentile.of(sorted, 0.99))
 	}
 }
 

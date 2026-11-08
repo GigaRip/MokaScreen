@@ -57,6 +57,9 @@ struct WindowSnapshotTests {
 				let wobble = sin(Double(second) / 4) * 0.9 + (second == 41 ? 3.5 : 0)
 				snapshot.presentDelayP50 = base + wobble
 				snapshot.presentDelayP99 = base + 2.8 + abs(wobble) * 1.6
+				// Idle for the first 12 seconds, then a rolling figure that drifts slowly.
+				snapshot.recentDelay = second < 12 ? 0 : base + wobble * 0.5
+				snapshot.recentDelayP99 = second < 12 ? 0 : base + 3.4 + abs(wobble)
 				history.append(snapshot)
 			}
 			try renderPanel(StatisticsPanelContent(receiver: history.last!, history: history, refreshRate: 120, source: "3456 × 2234"), to: directory.appending(path: "overlay-\(name).png"))
@@ -73,6 +76,8 @@ struct WindowSnapshotTests {
 			let wobble = sin(Double(second) / 5) * 1.6
 			snapshot.latencyP50 = 21.5 + wobble
 			snapshot.latencyP99 = 26 + abs(wobble) * 2
+			snapshot.recentLatency = 21.5 + wobble * 0.5
+			snapshot.recentLatencyP99 = 27.8 + abs(wobble)
 			senderHistory.append(snapshot)
 		}
 		try renderPanel(StatisticsPanelContent(sender: senderHistory.last!, history: senderHistory, refreshRate: 120, display: "3456 × 2234"), to: directory.appending(path: "overlay-sender.png"))
