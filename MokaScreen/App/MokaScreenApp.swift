@@ -66,6 +66,11 @@ final class AppModel {
 	let sender = SenderSession()
 	let receiver = ReceiverSession()
 	private(set) var isLoopback = false
+	/// The Thunderbolt Bridge as it is now, watched for as long as the app is open. Whether the
+	/// Mac has a bridge and a cable does not depend on what either session is doing, so the
+	/// views show this rather than a session's view of it.
+	private(set) var bridge: BridgeState?
+	@ObservationIgnored private var bridgeMonitor: BridgeMonitor?
 
 	var role: Role? {
 		didSet {
@@ -75,6 +80,12 @@ final class AppModel {
 
 	init() {
 		role = UserDefaults.standard.string(forKey: "role").flatMap(Role.init)
+		bridgeMonitor = BridgeMonitor { [weak self] state in
+			guard let self else { return }
+			self.bridge = state
+			self.sender.bridgeChanged(state)
+			self.receiver.bridgeChanged(state)
+		}
 	}
 
 	/// Starts the remembered role, so a Mac set up once is ready as soon as MokaScreen opens.

@@ -34,12 +34,14 @@ final class ReceiverSession {
 	}
 
 	private(set) var status: Status = .stopped
-	private(set) var bridge: BridgeState?
 	private(set) var stats = ReceiverSnapshot()
 	/// The name this Mac advertises to senders.
 	let serviceName = ReceiverSession.computerName()
 
-	@ObservationIgnored private var monitor: BridgeMonitor?
+	/// The latest bridge state from ``AppModel``, kept even while stopped so a start can act on it.
+	@ObservationIgnored private var bridge: BridgeState?
+	/// Whether bridge changes start and stop listening; true while started on the bridge.
+	@ObservationIgnored private var followsBridge = false
 	@ObservationIgnored private var listener: TCPListener?
 	@ObservationIgnored private var advertiser: BonjourAdvertiser?
 	@ObservationIgnored private var connection: Connection?
@@ -69,9 +71,8 @@ final class ReceiverSession {
 		guard status == .stopped else { return }
 		presentation = .fullScreen
 		status = .waitingForCable
-		monitor = BridgeMonitor { [weak self] state in
-			self?.bridgeChanged(state)
-		}
+		followsBridge = true
+		listenOnBridge()
 		// The sender sizes its virtual display from the advertised geometry, so a resolution
 		// change here must reach it before its next connection.
 		screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -96,8 +97,7 @@ final class ReceiverSession {
 
 	/// Disconnects and stops listening.
 	func stop() {
-		monitor?.stop()
-		monitor = nil
+		followsBridge = false
 		if let screenObserver {
 			NotificationCenter.default.removeObserver(screenObserver)
 		}
@@ -119,10 +119,18 @@ final class ReceiverSession {
 		}
 	}
 
-	private func bridgeChanged(_ state: BridgeState?) {
+	/// Receives every change to the Thunderbolt Bridge from ``AppModel``, whether or not the
+	/// session is running. Only a change of link or interface restarts listening.
+	func bridgeChanged(_ state: BridgeState?) {
 		let previous = bridge
 		bridge = state
-		guard listener == nil || state?.needsRestart(from: previous) ?? true else { return }
+		guard followsBridge, state?.needsRestart(from: previous) ?? true else { return }
+		listenOnBridge()
+	}
+
+	/// Restarts listening and advertising on the current bridge, or waits for a cable if it is not usable.
+	private func listenOnBridge() {
+		let state = bridge
 		stopListening()
 		guard let state, state.isUsable else {
 			if connection == nil { status = .waitingForCable }

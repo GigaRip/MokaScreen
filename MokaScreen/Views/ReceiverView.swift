@@ -20,8 +20,8 @@ struct ReceiverView: View {
 			GroupBox {
 				VStack(alignment: .leading, spacing: 10) {
 					LabeledContent("Name", value: session.serviceName)
-					LabeledContent("Thunderbolt Bridge", value: session.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
-					if let addresses = session.bridge?.addresses, !addresses.isEmpty {
+					LabeledContent("Thunderbolt Bridge", value: model.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
+					if let addresses = model.bridge?.addresses, !addresses.isEmpty {
 						LabeledContent("Addresses") {
 							Text(addresses.joined(separator: "\n"))
 								.multilineTextAlignment(.trailing)

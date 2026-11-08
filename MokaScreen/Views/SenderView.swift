@@ -31,7 +31,7 @@ struct SenderView: View {
 						ForEach(DisplayShape.available(on: session.receiverPanel)) { Text($0.title(on: session.receiverPanel)).tag($0) }
 					}
 					.disabled(session.isRunning)
-					LabeledContent("Thunderbolt Bridge", value: session.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
+					LabeledContent("Thunderbolt Bridge", value: model.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
 					if session.receivers.count > 1 {
 						Picker("Receiver", selection: $session.preferredReceiver) {
 							ForEach(session.receivers, id: \.self) { Text($0).tag(Optional($0)) }

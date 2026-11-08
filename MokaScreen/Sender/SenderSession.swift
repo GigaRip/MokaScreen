@@ -28,7 +28,6 @@ final class SenderSession {
 	}
 
 	private(set) var status: Status = .stopped
-	private(set) var bridge: BridgeState?
 	private(set) var receivers: [String] = []
 	private(set) var displayDescription = "—"
 	private(set) var stats = SenderSnapshot()
@@ -58,7 +57,10 @@ final class SenderSession {
 
 	@ObservationIgnored private var display: VirtualDisplay?
 	@ObservationIgnored private var capturer: ScreenCapturer?
-	@ObservationIgnored private var monitor: BridgeMonitor?
+	/// The latest bridge state from ``AppModel``, kept even while stopped so a start can act on it.
+	@ObservationIgnored private var bridge: BridgeState?
+	/// Whether bridge changes start and stop discovery; true once the display is up.
+	@ObservationIgnored private var followsBridge = false
 	@ObservationIgnored private var browser: BonjourBrowser?
 	@ObservationIgnored private var connectTask: Task<Void, Never>?
 	@ObservationIgnored private var statsTimer: Timer?
@@ -103,14 +105,9 @@ final class SenderSession {
 				startConnecting()
 			} else {
 				status = .waitingForCable
-				startMonitoringBridge()
+				followsBridge = true
+				browseBridge()
 			}
-		}
-	}
-
-	private func startMonitoringBridge() {
-		monitor = BridgeMonitor { [weak self] state in
-			self?.bridgeChanged(state)
 		}
 	}
 
@@ -119,8 +116,7 @@ final class SenderSession {
 		connectTask?.cancel()
 		connectTask = nil
 		link.setSender(nil)
-		monitor?.stop()
-		monitor = nil
+		followsBridge = false
 		browser?.stop()
 		browser = nil
 		receivers = []
@@ -215,11 +211,18 @@ final class SenderSession {
 		}
 	}
 
-	private func bridgeChanged(_ state: BridgeState?) {
+	/// Receives every change to the Thunderbolt Bridge from ``AppModel``, whether or not the
+	/// session is running. Only a change of link or interface restarts discovery.
+	func bridgeChanged(_ state: BridgeState?) {
 		let previous = bridge
 		bridge = state
-		// The first call always restarts; afterwards only link changes do.
-		guard browser == nil || state?.needsRestart(from: previous) ?? true else { return }
+		guard followsBridge, state?.needsRestart(from: previous) ?? true else { return }
+		browseBridge()
+	}
+
+	/// Restarts discovery on the current bridge, or waits for a cable if it is not usable.
+	private func browseBridge() {
+		let state = bridge
 		browser?.stop()
 		browser = nil
 		receivers = []
