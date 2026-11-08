@@ -64,6 +64,7 @@ final class ReceiverSession {
 		let renderer: FrameRenderer
 		var window: NSWindow?
 		var driver: PresentationDriver?
+		var refreshRate: RefreshRateRequest?
 		var activity: NSObjectProtocol?
 
 		init(receiver: FrameReceiver, renderer: FrameRenderer) {
@@ -244,6 +245,7 @@ final class ReceiverSession {
 		driver.start()
 		connection.window = window
 		connection.driver = driver
+		connection.refreshRate = RefreshRateRequest(view: view)
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
 		status = .showing(peer: peer)
@@ -255,6 +257,7 @@ final class ReceiverSession {
 		connection.receiver.stop()
 		connection.renderer.shutDown()
 		connection.driver?.stop()
+		connection.refreshRate?.invalidate()
 		if let activity = connection.activity {
 			ProcessInfo.processInfo.endActivity(activity)
 		}

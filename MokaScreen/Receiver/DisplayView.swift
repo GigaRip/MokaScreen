@@ -65,10 +65,9 @@ final class MetalLayerView: NSView {
 /// arrival removes the wait for the tick and lets ProMotion refresh the panel as soon as the frame
 /// is ready.
 ///
-/// Up to two drawables are in flight. With one, the display Mac's share alternated between about
-/// 7 ms and about 23 ms under the same 120 fps load: when macOS took two refreshes to show a
-/// drawable, each frame waited for the previous one and frames were drawn in pairs. Frames that
-/// arrive while both are in flight are folded into the next draw instead of queuing behind them.
+/// Up to two drawables are in flight; frames that arrive while both are in flight are folded
+/// into the next draw instead of queuing behind them. Presenting on arrival does not by itself
+/// tell macOS what refresh rate the screen needs; ``RefreshRateRequest`` does.
 final class PresentationDriver {
 	static let maxInFlight = 2
 	/// How long to wait for a drawable to be reported presented before drawing anyway, so a report
@@ -146,6 +145,33 @@ final class PresentationDriver {
 			inFlight -= 1
 			condition.signal()
 		}
+	}
+}
+
+/// Asks macOS to run the screen showing `view` at 120 Hz for as long as the request exists.
+///
+/// With frames presented on arrival and no display link, macOS sometimes ran the display Mac's
+/// ProMotion panel at 60 Hz under a steady 110 fps load: draws fell to 60 a second, frames waited
+/// about 8 ms to be folded in pairs, and each then took a 16.7 ms refresh to reach the glass, for
+/// about 23 ms instead of about 7. A display link's frame-rate range is the rate request macOS
+/// takes from an app; this link's callback does nothing.
+final class RefreshRateRequest: NSObject {
+	private var link: CADisplayLink?
+
+	init(view: NSView) {
+		super.init()
+		let link = view.displayLink(target: self, selector: #selector(tick))
+		link.preferredFrameRateRange = CAFrameRateRange(minimum: 120, maximum: 120, preferred: 120)
+		link.add(to: .main, forMode: .common)
+		self.link = link
+	}
+
+	@objc private func tick(_ link: CADisplayLink) {}
+
+	/// Ends the request. The link retains its target, so this also breaks that cycle.
+	func invalidate() {
+		link?.invalidate()
+		link = nil
 	}
 }
 

@@ -85,7 +85,7 @@ CGVirtualDisplay (HiDPI, 120 Hz)
                (Nagle off, writev from the                GPU-shared buffers
                 capture buffer, no copy)                    └─ blit into display texture
                                                                  └─ present on arrival, 120 Hz
-                ◄──────────────── "presented" acks ───────────── (one drawable in flight)
+                ◄──────────────── "presented" acks ───────────── (two drawables in flight)
 ```
 
 - **Bandwidth.** A full frame is ~31 MB; 120 Hz raw is ~30 Gbps and a single TCP
