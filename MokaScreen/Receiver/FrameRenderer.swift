@@ -26,12 +26,12 @@ enum RendererError: Error, CustomStringConvertible {
 
 /// Keeps the receiver's copy of the sender's display and draws it.
 ///
-/// Received rectangles land in a ring of shared `MTLBuffer` slots. On each display-link tick
-/// the renderer blits every frame completed since the last tick — in order, because each one
-/// only patches the previous image — into a private display texture, then draws that texture
-/// to the drawable. Only the newest state is ever presented.
+/// Received rectangles land in a ring of shared `MTLBuffer` slots. Each draw blits every frame
+/// completed since the last draw — in order, because each one only patches the previous image —
+/// into a private display texture, then draws that texture to the drawable. Only the newest state
+/// is ever presented.
 final class FrameRenderer: FrameSink {
-	/// Slots in the receive ring: one being filled, one waiting for the next tick, one being blitted.
+	/// Slots in the receive ring: one being filled, one waiting to be drawn, one being blitted.
 	static let slotCount = 3
 
 	let device: MTLDevice
@@ -49,6 +49,13 @@ final class FrameRenderer: FrameSink {
 
 	/// Called from a Metal thread with the newest frame ID each time a drawable reaches the screen.
 	var onPresented: ((UInt64) -> Void)?
+
+	/// Called from the reader thread whenever there is something new to draw.
+	var onWork: (() -> Void)? {
+		get { lock.withLock { work } }
+		set { lock.withLock { work = newValue } }
+	}
+	private var work: (() -> Void)?
 
 	/// The display texture plus the slot ring that feeds it, for one display size.
 	private final class Surface {
@@ -125,7 +132,9 @@ final class FrameRenderer: FrameSink {
 		pending.removeAll()
 		needsRedraw = true
 		shuttingDown = false
+		let work = work
 		lock.unlock()
+		work?()
 		Log.render.info("Display surface \(width, privacy: .public)×\(height, privacy: .public)")
 	}
 
@@ -155,7 +164,9 @@ final class FrameRenderer: FrameSink {
 	func commit(_ frame: ReceivedFrame) {
 		lock.lock()
 		pending.append(frame)
+		let work = work
 		lock.unlock()
+		work?()
 	}
 
 	/// Unblocks a reader waiting for a slot; called when its connection ends.
@@ -181,18 +192,26 @@ final class FrameRenderer: FrameSink {
 		}
 	}
 
-	/// Forces the next tick to draw even if no frame arrived, e.g. after the drawable was resized.
+	/// Draws again even if no frame arrived, e.g. after the drawable was resized.
 	func setNeedsRedraw() {
 		lock.lock()
 		needsRedraw = true
+		let work = work
 		lock.unlock()
+		work?()
+	}
+
+	/// Whether a frame or a redraw is waiting.
+	var hasWork: Bool {
+		lock.withLock { !pending.isEmpty || needsRedraw }
 	}
 
 	// MARK: Drawing (render thread)
 
-	/// Applies every completed frame and draws the result. Returns without presenting when
-	/// nothing changed, which leaves the previous image on screen.
-	func draw(to drawable: CAMetalDrawable) {
+	/// Applies every completed frame and draws the result, calling `whenShown` once the drawable
+	/// has been presented or dropped. Returns false without presenting when nothing changed,
+	/// which leaves the previous image on screen.
+	func draw(to drawable: CAMetalDrawable, whenShown: @escaping () -> Void) -> Bool {
 		lock.lock()
 		let frames = pending
 		pending.removeAll(keepingCapacity: true)
@@ -205,13 +224,13 @@ final class FrameRenderer: FrameSink {
 		      let commandBuffer = commandQueue.makeCommandBuffer()
 		else {
 			release(frames.map(\.slot))
-			return
+			return false
 		}
 
 		let current = frames.filter { surface.owns($0.slot) }
 		guard surface.hasContent || !current.isEmpty else {
 			release(frames.map(\.slot))
-			return
+			return false
 		}
 		surface.hasContent = true
 		if !current.isEmpty, let blit = commandBuffer.makeBlitCommandEncoder() {
@@ -249,19 +268,19 @@ final class FrameRenderer: FrameSink {
 			encoder.endEncoding()
 		}
 
-		if let newest = current.last {
-			let receivedTimes = current.map(\.receivedTime)
-			let stats = stats
-			let onPresented = onPresented
-			drawable.addPresentedHandler { drawable in
-				let presented = drawable.presentedTime
-				guard presented > 0 else { return }
-				let presentedNanos = UInt64(presented * 1e9)
-				for received in receivedTimes {
-					stats.recordPresented(delay: Double(presentedNanos &- received) / 1e9)
-				}
-				onPresented?(newest.frameID)
+		let newest = current.last?.frameID
+		let receivedTimes = current.map(\.receivedTime)
+		let stats = stats
+		let onPresented = onPresented
+		drawable.addPresentedHandler { drawable in
+			defer { whenShown() }
+			let presented = drawable.presentedTime
+			guard presented > 0, let newest else { return }
+			let presentedNanos = UInt64(presented * 1e9)
+			for received in receivedTimes {
+				stats.recordPresented(delay: Double(presentedNanos &- received) / 1e9)
 			}
+			onPresented?(newest)
 		}
 		commandBuffer.present(drawable)
 		let slots = frames.map(\.slot)
@@ -269,6 +288,7 @@ final class FrameRenderer: FrameSink {
 			self?.release(slots)
 		}
 		commandBuffer.commit()
+		return true
 	}
 
 	// Compiled at runtime (a few milliseconds, once per connection) so building MokaScreen needs

@@ -63,7 +63,7 @@ final class ReceiverSession {
 		let receiver: FrameReceiver
 		let renderer: FrameRenderer
 		var window: NSWindow?
-		var driver: DisplayLinkDriver?
+		var driver: PresentationDriver?
 		var activity: NSObjectProtocol?
 
 		init(receiver: FrameReceiver, renderer: FrameRenderer) {
@@ -240,7 +240,7 @@ final class ReceiverSession {
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
 
-		let driver = DisplayLinkDriver(layer: view.metalLayer, renderer: connection.renderer)
+		let driver = PresentationDriver(layer: view.metalLayer, renderer: connection.renderer)
 		driver.start()
 		connection.window = window
 		connection.driver = driver

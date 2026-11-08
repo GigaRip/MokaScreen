@@ -57,19 +57,28 @@ final class MetalLayerView: NSView {
 	}
 }
 
-/// Drives a ``FrameRenderer`` from a `CAMetalDisplayLink` on a dedicated thread.
+/// Draws each frame as soon as it has arrived, on a dedicated thread.
 ///
-/// `CAMetalDisplayLink` (rather than a plain `CADisplayLink`) hands over a drawable already
-/// timed for the next refresh, and `preferredFrameLatency = 1` asks for it to be shown on the
-/// very next vsync. Running on its own thread keeps presentation independent of the main
-/// thread, so UI work on the receiver cannot cost a frame.
-final class DisplayLinkDriver: NSObject, CAMetalDisplayLinkDelegate {
+/// A `CAMetalDisplayLink` with `preferredFrameLatency = 1` put about one more refresh between a
+/// frame's arrival and the glass than expected: at a steady 100+ fps the display Mac's share
+/// measured 20 ms against 12.5 ms for an average half-refresh wait plus one refresh. Presenting on
+/// arrival removes the wait for the tick and lets ProMotion refresh the panel as soon as the frame
+/// is ready. At most one drawable is in flight, so frames that arrive while it waits for the glass
+/// are folded into the next draw instead of queuing behind it.
+final class PresentationDriver {
+	/// How long to wait for a drawable to be reported presented before drawing anyway, so a report
+	/// that never comes cannot freeze the screen.
+	private static let presentTimeout: TimeInterval = 0.1
+
 	private let layer: CAMetalLayer
 	private let renderer: FrameRenderer
-	private let lock = NSLock()
-	private var link: CAMetalDisplayLink?
-	private var runLoop: CFRunLoop?
+	private let wake = DispatchSemaphore(value: 0)
+	/// Guards `stopped`, `inFlight`, and `generation`, and signals when a drawable is presented.
+	private let condition = NSCondition()
 	private var stopped = false
+	private var inFlight = false
+	/// Identifies the drawable in flight, so a report arriving after its timeout cannot clear the next one.
+	private var generation = 0
 
 	init(layer: CAMetalLayer, renderer: FrameRenderer) {
 		self.layer = layer
@@ -77,37 +86,60 @@ final class DisplayLinkDriver: NSObject, CAMetalDisplayLinkDelegate {
 	}
 
 	func start() {
-		let thread = Thread { [self] in
-			let link = CAMetalDisplayLink(metalLayer: layer)
-			link.delegate = self
-			link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
-			link.preferredFrameLatency = 1
-			link.add(to: .current, forMode: .default)
-			lock.withLock {
-				self.link = link
-				runLoop = CFRunLoopGetCurrent()
-			}
-			while !lock.withLock({ stopped }) {
-				RunLoop.current.run(mode: .default, before: .distantFuture)
-			}
-			link.invalidate()
-		}
+		renderer.onWork = { [wake] in wake.signal() }
+		let thread = Thread { [self] in run() }
 		thread.name = "MokaScreen.render"
 		thread.qualityOfService = .userInteractive
 		thread.start()
+		// Frames that arrived before the window was shown are already waiting.
+		wake.signal()
 	}
 
 	func stop() {
-		lock.withLock {
+		renderer.onWork = nil
+		condition.withLock {
 			stopped = true
-			if let runLoop {
-				CFRunLoopStop(runLoop)
+			condition.broadcast()
+		}
+		wake.signal()
+	}
+
+	private func run() {
+		while true {
+			wake.wait()
+			guard waitForGlass() else { return }
+			guard renderer.hasWork, let drawable = layer.nextDrawable() else { continue }
+			let current = condition.withLock {
+				generation &+= 1
+				inFlight = true
+				return generation
+			}
+			let presented = renderer.draw(to: drawable) { [weak self] in self?.presented(current) }
+			if !presented {
+				self.presented(current)
 			}
 		}
 	}
 
-	func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
-		renderer.draw(to: update.drawable)
+	/// Waits until no drawable is in flight, or the timeout passes. Returns false once stopped.
+	private func waitForGlass() -> Bool {
+		condition.withLock {
+			let deadline = Date(timeIntervalSinceNow: Self.presentTimeout)
+			while inFlight, !stopped {
+				if !condition.wait(until: deadline) {
+					inFlight = false
+				}
+			}
+			return !stopped
+		}
+	}
+
+	private func presented(_ drawable: Int) {
+		condition.withLock {
+			guard drawable == generation else { return }
+			inFlight = false
+			condition.signal()
+		}
 	}
 }
 
