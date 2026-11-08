@@ -19,7 +19,8 @@ import Foundation
 /// streams frames (`frameBegin` followed by exactly `rectCount` × `rect`) while
 /// the receiver reports each frame it puts on glass with `presented`. Either side
 /// may send `statistics` between frames to change the other's Show Statistics
-/// setting; the sender sends its own right after the handshake. A side ignores a
+/// setting; the sender sends its own right after the handshake. While showing,
+/// the receiver sends a `displayReport` once a second with its share of the delay. A side ignores a
 /// header type it does not know, outside a frame, so a later message type that
 /// carries no payload does not need a version change.
 enum Wire {
@@ -47,6 +48,7 @@ enum MessageType: UInt32 {
 	case rect = 4
 	case presented = 5
 	case statistics = 6
+	case displayReport = 7
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -231,6 +233,59 @@ struct StatisticsMessage: Equatable {
 	static func decode(_ p: UnsafeRawPointer) throws -> StatisticsMessage {
 		try WireHeader.expect(.statistics, p)
 		return StatisticsMessage(visible: WireHeader.load32(p, 4) != 0)
+	}
+}
+
+/// Receiver → sender, once a second while showing: the display Mac's share of the delay, so
+/// the Mac you work on can show the whole breakdown. The display Mac cannot show it itself:
+/// anything drawn over the picture makes WindowServer composite it, adding a refresh of delay.
+struct DisplayReportMessage: Equatable {
+	/// Rolling median and 99th percentile from the last byte of a frame arriving to it being on
+	/// glass, in microseconds.
+	var delayP50Micros: UInt32
+	var delayP99Micros: UInt32
+	/// Frames received and presented over `intervalMillis`.
+	var receivedFrames: UInt32
+	var presentedFrames: UInt32
+	var intervalMillis: UInt32
+
+	init(delayP50Micros: UInt32, delayP99Micros: UInt32, receivedFrames: UInt32, presentedFrames: UInt32, intervalMillis: UInt32) {
+		self.delayP50Micros = delayP50Micros
+		self.delayP99Micros = delayP99Micros
+		self.receivedFrames = receivedFrames
+		self.presentedFrames = presentedFrames
+		self.intervalMillis = intervalMillis
+	}
+
+	init(_ snapshot: ReceiverSnapshot) {
+		self.init(
+			delayP50Micros: UInt32(clamping: Int((snapshot.recentDelay * 1000).rounded())),
+			delayP99Micros: UInt32(clamping: Int((snapshot.recentDelayP99 * 1000).rounded())),
+			receivedFrames: UInt32(clamping: snapshot.receivedFrames),
+			presentedFrames: UInt32(clamping: snapshot.presentedFrames),
+			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded()))
+		)
+	}
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.displayReport.rawValue, p, 0)
+		WireHeader.store(delayP50Micros, p, 4)
+		WireHeader.store(delayP99Micros, p, 8)
+		WireHeader.store(receivedFrames, p, 12)
+		WireHeader.store(presentedFrames, p, 16)
+		WireHeader.store(intervalMillis, p, 20)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> DisplayReportMessage {
+		try WireHeader.expect(.displayReport, p)
+		return DisplayReportMessage(
+			delayP50Micros: WireHeader.load32(p, 4),
+			delayP99Micros: WireHeader.load32(p, 8),
+			receivedFrames: WireHeader.load32(p, 12),
+			presentedFrames: WireHeader.load32(p, 16),
+			intervalMillis: WireHeader.load32(p, 20)
+		)
 	}
 }
 

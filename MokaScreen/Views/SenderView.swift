@@ -49,11 +49,11 @@ struct SenderView: View {
 				}
 			}
 
-			if showsStatistics {
-				// The rates and latency are in the floating statistics panel; the window keeps what
-				// the panel does not show.
+			// Nothing can be measured until Screen Recording is allowed.
+			if showsStatistics, session.status != .needsPermission {
+				LatencyBreakdown(stats: session.stats, history: session.history, refreshRate: session.refreshRate ?? 120)
 				InfoSection {
-					StatRow("Superseded", "\(session.stats.supersededFrames) frames")
+					SenderStatsView(stats: session.stats)
 					BridgeDetailRows(bridge: model.bridge)
 					InfoRow(label: "Record to a CSV file") {
 						Toggle("Record to a CSV file", isOn: $session.recordsStats)

@@ -24,82 +24,41 @@ struct WindowSnapshotTests {
 		// A private defaults suite, so the app's real "Show Statistics" setting is untouched.
 		let defaults = try #require(UserDefaults(suiteName: "com.gigarip.mokascreen.snapshots"))
 		let model = AppModel()
-		var connected = SenderSnapshot()
-		connected.recentLatency = 8.4
-		let senderStates: [(String, SenderSession.Status, Int?, SenderSnapshot)] = [
-			("stopped", .stopped, nil, SenderSnapshot()),
-			("permission", .needsPermission, nil, SenderSnapshot()),
-			("connected", .connected("Brian's MacBook Pro"), 120, connected),
+		// Forty seconds of a connection: idle at first, then a busy stretch.
+		var history: [SenderSnapshot] = []
+		for second in 0..<40 {
+			var snapshot = SenderSnapshot()
+			snapshot.interval = 1
+			let busy = second >= 8
+			snapshot.capturedFrames = busy ? 120 : 0
+			snapshot.sentFrames = busy ? 118 : 0
+			snapshot.bytes = busy ? 300_000_000 : 0
+			snapshot.meanCoverage = busy ? 0.031 : 0
+			snapshot.maxCoverage = busy ? 0.2 : 0
+			let wobble = sin(Double(second) / 5) * 1.2
+			snapshot.recentLatency = second < 2 ? 0 : 22 + wobble
+			snapshot.recentLatencyP99 = second < 2 ? 0 : 29 + abs(wobble)
+			snapshot.latencyMax = busy ? 31 : 0
+			snapshot.displayDelay = second < 3 ? 0 : 15.5 + wobble * 0.6
+			snapshot.displayDelayP99 = second < 3 ? 0 : 19
+			snapshot.displayPresentedFPS = busy ? 118 : 0
+			history.append(snapshot)
+		}
+		let senderStates: [(String, SenderSession.Status, Int?, [SenderSnapshot])] = [
+			("stopped", .stopped, nil, []),
+			("permission", .needsPermission, nil, []),
+			("connected", .connected("Brian's MacBook Pro"), 120, history),
 		]
 		for showsStatistics in [false, true] {
 			defaults.set(showsStatistics, forKey: StatisticsPreference.key)
 			let suffix = showsStatistics ? "-statistics" : ""
-			for (name, status, refreshRate, stats) in senderStates {
-				model.sender.applySnapshotState(status: status, refreshRate: refreshRate, stats: stats)
+			for (name, status, refreshRate, history) in senderStates {
+				model.sender.applySnapshotState(status: status, refreshRate: refreshRate, stats: history.last ?? SenderSnapshot(), history: history)
 				try render(SenderView(session: model.sender), model: model, defaults: defaults, to: directory.appending(path: "sender-\(name)\(suffix).png"))
 			}
 			try render(ReceiverView(session: model.receiver), model: model, defaults: defaults, to: directory.appending(path: "receiver\(suffix).png"))
 		}
 		model.sender.applySnapshotState(status: .stopped)
-	}
-
-	@Test(.enabled(if: directory != nil))
-	func renderStatisticsOverlay() throws {
-		let directory = URL(fileURLWithPath: try #require(Self.directory))
-		for (name, base) in [("green", 5.6), ("amber", 11.0)] {
-			var history: [ReceiverSnapshot] = []
-			for second in 0..<StatisticsPanelContent.historyLength {
-				var snapshot = ReceiverSnapshot()
-				snapshot.interval = 1
-				snapshot.receivedFrames = 118
-				snapshot.presentedFrames = 120
-				snapshot.bytes = 310_000_000
-				let wobble = sin(Double(second) / 4) * 0.9 + (second == 41 ? 3.5 : 0)
-				snapshot.presentDelayP50 = base + wobble
-				snapshot.presentDelayP99 = base + 2.8 + abs(wobble) * 1.6
-				// Idle for the first 12 seconds, then a rolling figure that drifts slowly.
-				snapshot.recentDelay = second < 12 ? 0 : base + wobble * 0.5
-				snapshot.recentDelayP99 = second < 12 ? 0 : base + 3.4 + abs(wobble)
-				history.append(snapshot)
-			}
-			try renderPanel(StatisticsPanelContent(receiver: history.last!, history: history, refreshRate: 120, source: "3456 × 2234"), to: directory.appending(path: "overlay-\(name).png"))
-		}
-
-		var senderHistory: [SenderSnapshot] = []
-		for second in 0..<StatisticsPanelContent.historyLength {
-			var snapshot = SenderSnapshot()
-			snapshot.interval = 1
-			snapshot.capturedFrames = 120
-			snapshot.sentFrames = 118
-			snapshot.bytes = 300_000_000
-			snapshot.meanCoverage = 0.031
-			let wobble = sin(Double(second) / 5) * 1.6
-			snapshot.latencyP50 = 21.5 + wobble
-			snapshot.latencyP99 = 26 + abs(wobble) * 2
-			snapshot.recentLatency = 21.5 + wobble * 0.5
-			snapshot.recentLatencyP99 = 27.8 + abs(wobble)
-			senderHistory.append(snapshot)
-		}
-		try renderPanel(StatisticsPanelContent(sender: senderHistory.last!, history: senderHistory, refreshRate: 120, display: "3456 × 2234"), to: directory.appending(path: "overlay-sender.png"))
-	}
-
-	private func renderPanel(_ content: StatisticsPanelContent, to url: URL) throws {
-		do {
-			let panel = StatisticsPanel(content: content)
-				.padding(40)
-				.background {
-					// Stands in for the shared screen behind the panel.
-					LinearGradient(colors: [.indigo, .teal, .orange], startPoint: .topLeading, endPoint: .bottomTrailing)
-				}
-			let host = NSHostingView(rootView: panel)
-			host.frame = NSRect(origin: .zero, size: host.fittingSize)
-			let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-			window.contentView = host
-			host.layoutSubtreeIfNeeded()
-			let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-			host.cacheDisplay(in: host.bounds, to: rep)
-			try #require(rep.representation(using: .png, properties: [:])).write(to: url)
-		}
 	}
 
 	/// Renders `view` the way ``ContentView`` lays it out: fixed width, natural height.

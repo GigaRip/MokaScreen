@@ -35,12 +35,6 @@ final class ReceiverSession {
 
 	private(set) var status: Status = .stopped
 	private(set) var stats = ReceiverSnapshot()
-	/// The last minute of per-second statistics while showing, oldest first, for the overlay's chart.
-	private(set) var history: [ReceiverSnapshot] = []
-	/// The incoming picture's size in pixels, such as "3456 × 2234", while showing.
-	private(set) var sourceSize: String?
-	/// The refresh rate of the screen the picture is shown on.
-	private(set) var displayRate = 120
 
 	/// The name this Mac advertises to senders.
 	let serviceName = ReceiverSession.computerName()
@@ -71,7 +65,6 @@ final class ReceiverSession {
 		var window: NSWindow?
 		var driver: DisplayLinkDriver?
 		var activity: NSObjectProtocol?
-		var overlay: StatisticsOverlayView?
 
 		init(receiver: FrameReceiver, renderer: FrameRenderer) {
 			self.receiver = receiver
@@ -134,9 +127,10 @@ final class ReceiverSession {
 			MainActor.assumeIsolated {
 				guard let self else { return }
 				self.stats = self.receiverStats.drain()
+				// The display Mac's window is hidden behind the picture while showing, so its
+				// share of the delay is shown on the other Mac.
 				if case .showing = self.status {
-					self.history.append(self.stats)
-					self.history.removeFirst(max(0, self.history.count - StatisticsPanelContent.historyLength))
+					self.connection?.receiver.sendReport(self.stats)
 				}
 			}
 		}
@@ -218,11 +212,6 @@ final class ReceiverSession {
 	private func show(_ connection: Connection, peer: String, hello: HelloMessage) {
 		let view = MetalLayerView(device: connection.renderer.device)
 		view.onDrawableResize = { [weak renderer = connection.renderer] in renderer?.setNeedsRedraw() }
-		// The Metal view hosts its layer, and a layer-hosting view cannot have subviews, so the
-		// statistics overlay is its sibling in a plain container.
-		let container = NSView()
-		container.addSubview(view)
-		view.autoresizingMask = [.width, .height]
 
 		let window: NSWindow
 		switch presentation {
@@ -237,10 +226,6 @@ final class ReceiverSession {
 			window = fullScreen
 			NSApp.presentationOptions = [.hideDock, .hideMenuBar]
 			NSCursor.hide()
-			let overlay = StatisticsOverlayView(session: self)
-			overlay.autoresizingMask = [.width, .height]
-			container.addSubview(overlay)
-			connection.overlay = overlay
 		case .window:
 			window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Int(hello.width) / 4, height: Int(hello.height) / 4), styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
 			window.title = "MokaScreen Loopback"
@@ -249,9 +234,9 @@ final class ReceiverSession {
 		}
 		window.isReleasedWhenClosed = false
 		window.backgroundColor = .black
-		window.contentView = container
-		view.frame = container.bounds
-		connection.overlay?.frame = container.bounds
+		// Nothing is drawn above the Metal layer, so WindowServer can show it directly instead of
+		// compositing the window, which would add a refresh of latency.
+		window.contentView = view
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
 
@@ -261,17 +246,12 @@ final class ReceiverSession {
 		connection.driver = driver
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
-		history = []
-		sourceSize = "\(hello.width) × \(hello.height)"
-		displayRate = max(60, window.screen?.maximumFramesPerSecond ?? 120)
 		status = .showing(peer: peer)
 	}
 
 	private func disconnect() {
 		guard let connection else { return }
 		self.connection = nil
-		history = []
-		sourceSize = nil
 		connection.receiver.stop()
 		connection.renderer.shutDown()
 		connection.driver?.stop()

@@ -210,6 +210,8 @@ final class FrameSender {
 					}
 				case .statistics(let statistics):
 					onStatistics(statistics.visible)
+				case .displayReport(let report):
+					stats.recordDisplayReport(report)
 				case .unknown:
 					break
 				}
@@ -237,12 +239,14 @@ final class FrameSender {
 private enum ReceiverMessage {
 	case presented(PresentedMessage)
 	case statistics(StatisticsMessage)
+	case displayReport(DisplayReportMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
 		switch MessageType(rawValue: WireHeader.type(p)) {
 		case .presented: .presented(try PresentedMessage.decode(p))
 		case .statistics: .statistics(try StatisticsMessage.decode(p))
+		case .displayReport: .displayReport(try DisplayReportMessage.decode(p))
 		default: .unknown
 		}
 	}

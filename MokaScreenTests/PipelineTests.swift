@@ -223,6 +223,25 @@ struct PipelineTests {
 		#expect(loopback.sink.snapshot() == expectedImage(width: width, height: height, fill: fill))
 	}
 
+	@Test func displayReportReachesTheSenderStatistics() throws {
+		let loopback = try Loopback(width: 64, height: 48)
+		defer { loopback.close() }
+		var snapshot = ReceiverSnapshot()
+		snapshot.interval = 1
+		snapshot.presentedFrames = 120
+		snapshot.recentDelay = 15.5
+		snapshot.recentDelayP99 = 19
+		loopback.receiver.sendReport(snapshot)
+
+		var stats = SenderSnapshot()
+		for _ in 0..<50 where stats.displayDelay == 0 {
+			Thread.sleep(forTimeInterval: 0.02)
+			stats = loopback.senderStats.drain()
+		}
+		#expect(stats.displayDelay == 15.5)
+		#expect(stats.displayDelayP99 == 19)
+	}
+
 	@Test func fullFrameThroughputOverLoopback() throws {
 		let (width, height) = (3456, 2234)
 		let loopback = try Loopback(width: width, height: height)

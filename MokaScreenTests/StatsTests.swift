@@ -47,6 +47,18 @@ struct StatsTests {
 		#expect(stats.drain().recentDelay == 0)
 	}
 
+	@Test func displayReportIsHeldUntilTheNextOneOrAReset() {
+		let stats = SenderStats()
+		stats.recordDisplayReport(DisplayReportMessage(delayP50Micros: 15_500, delayP99Micros: 19_000, receivedFrames: 60, presentedFrames: 60, intervalMillis: 500))
+		let first = stats.drain()
+		#expect(first.displayDelay == 15.5)
+		#expect(first.displayDelayP99 == 19)
+		#expect(first.displayPresentedFPS == 120)
+		#expect(stats.drain().displayDelay == 15.5)
+		stats.resetRecent()
+		#expect(stats.drain().displayDelay == 0)
+	}
+
 	@Test func resetForgetsRecentLatency() {
 		let stats = SenderStats()
 		stats.recordPresented(latency: 0.030)

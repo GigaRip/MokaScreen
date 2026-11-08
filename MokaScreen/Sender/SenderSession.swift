@@ -74,7 +74,6 @@ final class SenderSession {
 	@ObservationIgnored private let senderStats = SenderStats()
 	@ObservationIgnored private let link = CaptureLink()
 	@ObservationIgnored private var statisticsSync: StatisticsSync!
-	@ObservationIgnored private var statisticsWindow: StatisticsWindow?
 	/// The last minute of per-second statistics while connected, oldest first.
 	private(set) var history: [SenderSnapshot] = []
 	/// The virtual display's size in pixels, such as "3456 × 2234", while it exists.
@@ -91,10 +90,11 @@ final class SenderSession {
 
 	#if DEBUG
 	/// Puts the session in a state for window snapshots, without a display or a connection.
-	func applySnapshotState(status: Status, refreshRate: Int? = nil, stats: SenderSnapshot = SenderSnapshot()) {
+	func applySnapshotState(status: Status, refreshRate: Int? = nil, stats: SenderSnapshot = SenderSnapshot(), history: [SenderSnapshot] = []) {
 		self.status = status
 		self.refreshRate = refreshRate
 		self.stats = stats
+		self.history = history
 	}
 	#endif
 
@@ -116,7 +116,6 @@ final class SenderSession {
 		status = .starting
 		lastError = nil
 		startStatsTimer()
-		statisticsWindow = StatisticsWindow(session: self)
 		Task {
 			do {
 				try await startDisplayAndCapture()
@@ -149,8 +148,6 @@ final class SenderSession {
 		browser?.stop()
 		browser = nil
 		receivers = []
-		statisticsWindow?.close()
-		statisticsWindow = nil
 		statsTimer?.invalidate()
 		statsTimer = nil
 		history = []
@@ -399,7 +396,7 @@ final class SenderSession {
 				self.stats = self.senderStats.drain()
 				if case .connected = self.status {
 					self.history.append(self.stats)
-					self.history.removeFirst(max(0, self.history.count - StatisticsPanelContent.historyLength))
+					self.history.removeFirst(max(0, self.history.count - LatencyBreakdown.historyLength))
 				}
 				if case .connected = self.status {
 					self.recorder?.append(self.stats)

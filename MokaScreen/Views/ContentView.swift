@@ -129,16 +129,16 @@ struct StatRow: View {
 	}
 }
 
-/// The sender's per-second figures, as rows for an ``InfoSection``.
+/// The per-second rates behind the latency, as rows for an ``InfoSection``.
 struct SenderStatsView: View {
 	let stats: SenderSnapshot
 
 	var body: some View {
 		StatRow("Captured", String(format: "%.0f fps", stats.capturedFPS))
 		StatRow("Sent", String(format: "%.0f fps  ·  %.2f Gbps", stats.sentFPS, stats.gigabitsPerSecond))
+		StatRow("Shown on the display Mac", stats.displayPresentedFPS > 0 ? String(format: "%.0f fps", stats.displayPresentedFPS) : "—")
 		StatRow("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100))
 		StatRow("Superseded", "\(stats.supersededFrames) frames")
-		StatRow("Capture → on glass", stats.latencyP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99  ·  %.1f ms max", stats.latencyP50, stats.latencyP99, stats.latencyMax) : "—")
 	}
 }
 

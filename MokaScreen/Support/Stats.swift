@@ -31,12 +31,19 @@ struct SenderSnapshot: Equatable {
 	var recentLatency = 0.0
 	/// 99th percentile over the same frames as ``recentLatency``.
 	var recentLatencyP99 = 0.0
+	/// The display Mac's share of ``recentLatency``, from its last report: the rolling median and
+	/// p99 from a frame's last byte arriving to it being on glass, in milliseconds; 0 before the
+	/// first report.
+	var displayDelay = 0.0
+	var displayDelayP99 = 0.0
+	/// Frames the display Mac put on screen per second, from its last report.
+	var displayPresentedFPS = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
 	var gigabitsPerSecond: Double { interval > 0 ? Double(bytes) * 8 / interval / 1e9 : 0 }
 
-	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms"
+	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps"
 
 	func csvRow(at date: Date) -> String {
 		let rectsPerFrame = sentFrames > 0 ? Double(rects) / Double(sentFrames) : 0
@@ -47,6 +54,8 @@ struct SenderSnapshot: Equatable {
 			String(format: "%.3f", gigabitsPerSecond), String(format: "%.1f", rectsPerFrame),
 			String(format: "%.2f", meanCoverage * 100), String(format: "%.2f", maxCoverage * 100),
 			String(format: "%.2f", latencyP50), String(format: "%.2f", latencyP99), String(format: "%.2f", latencyMax),
+			String(format: "%.2f", recentLatency),
+			String(format: "%.2f", displayDelay), String(format: "%.2f", displayDelayP99), String(format: "%.1f", displayPresentedFPS),
 		].joined(separator: ",")
 	}
 }
@@ -58,6 +67,7 @@ final class SenderStats: @unchecked Sendable {
 	private var coverageSum = 0.0
 	private var latencies: [Double] = []
 	private var recent = RecentLatencies()
+	private var displayReport: DisplayReportMessage?
 	private var since = Date()
 
 	/// Frames behind ``SenderSnapshot/recentLatency``.
@@ -91,10 +101,18 @@ final class SenderStats: @unchecked Sendable {
 		}
 	}
 
-	/// Forgets the recent latencies, so a new connection is not judged by the previous one.
+	/// Keeps the display Mac's latest report for the next snapshot. Its delays are already rolling
+	/// figures, so the report is held until the next one arrives.
+	func recordDisplayReport(_ report: DisplayReportMessage) {
+		lock.withLock { displayReport = report }
+	}
+
+	/// Forgets the recent latencies and the display Mac's report, so a new connection is not
+	/// judged by the previous one.
 	func resetRecent() {
 		lock.withLock {
 			recent.removeAll()
+			displayReport = nil
 		}
 	}
 
@@ -110,6 +128,11 @@ final class SenderStats: @unchecked Sendable {
 			snapshot.latencyP99 = Percentile.of(sorted, 0.99)
 			snapshot.latencyMax = sorted.last ?? 0
 			(snapshot.recentLatency, snapshot.recentLatencyP99) = recent.percentiles()
+			if let report = displayReport {
+				snapshot.displayDelay = Double(report.delayP50Micros) / 1000
+				snapshot.displayDelayP99 = Double(report.delayP99Micros) / 1000
+				snapshot.displayPresentedFPS = report.intervalMillis > 0 ? Double(report.presentedFrames) * 1000 / Double(report.intervalMillis) : 0
+			}
 			current = SenderSnapshot()
 			coverageSum = 0
 			latencies.removeAll(keepingCapacity: true)

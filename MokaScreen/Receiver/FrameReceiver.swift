@@ -130,6 +130,15 @@ final class FrameReceiver {
 		}
 	}
 
+	/// Sends this second's statistics to the sender. Thread-safe; written on the queue that writes
+	/// `presented`.
+	func sendReport(_ snapshot: ReceiverSnapshot) {
+		let report = DisplayReportMessage(snapshot)
+		ackQueue.async { [self] in
+			try? stream.writeHeader { report.encode(into: $0) }
+		}
+	}
+
 	private func run() throws {
 		let hello = try stream.readHeader(HelloMessage.decode)
 		guard hello.pixelFormat == Wire.pixelFormatBGRA8, hello.colorSpace == Wire.colorSpaceDisplayP3,
@@ -184,7 +193,7 @@ private enum SenderMessage {
 		case .frameBegin: .frameBegin(try FrameBeginMessage.decode(p))
 		case .statistics: .statistics(try StatisticsMessage.decode(p))
 		// A rect outside a frame is a protocol error, not an unknown message.
-		case .rect, .hello, .helloAck, .presented: throw WireError.unexpectedMessage(WireHeader.type(p))
+		case .rect, .hello, .helloAck, .presented, .displayReport: throw WireError.unexpectedMessage(WireHeader.type(p))
 		case nil: .unknown
 		}
 	}

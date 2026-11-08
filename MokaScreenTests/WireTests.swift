@@ -25,6 +25,11 @@ struct WireTests {
 		#expect(try roundTrip(message.encode, StatisticsMessage.decode) == message)
 	}
 
+	@Test func displayReportRoundTrips() throws {
+		let report = DisplayReportMessage(delayP50Micros: 15_480, delayP99Micros: 19_020, receivedFrames: 118, presentedFrames: 120, intervalMillis: 1003)
+		#expect(try roundTrip(report.encode, DisplayReportMessage.decode) == report)
+	}
+
 	@Test func helloRoundTrips() throws {
 		let hello = HelloMessage(width: 3456, height: 2234)
 		#expect(try roundTrip(hello.encode, HelloMessage.decode) == hello)
