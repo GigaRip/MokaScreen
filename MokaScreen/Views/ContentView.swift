@@ -93,9 +93,11 @@ private struct LoopbackView: View {
 				.font(.title2.weight(.semibold))
 			Text("This Mac is both sender and receiver. The MokaScreen display is captured, sent over a local TCP connection, and drawn in a window.")
 				.foregroundStyle(.secondary)
-			LabeledContent("Sender", value: model.sender.status.label)
-			LabeledContent("Receiver", value: model.receiver.status.label)
-			SenderStatsView(stats: model.sender.stats)
+			InfoSection {
+				InfoRow("Sender", model.sender.status.label)
+				InfoRow("Receiver", model.receiver.status.label)
+				SenderStatsView(stats: model.sender.stats)
+			}
 			Spacer()
 			HStack {
 				Spacer()
@@ -105,34 +107,34 @@ private struct LoopbackView: View {
 	}
 }
 
-/// A labelled grid of numbers.
-struct StatGrid: View {
-	let rows: [(String, String)]
+/// A statistics row: an ``InfoRow`` with figures in tabular digits so they do not jitter as
+/// they change every second.
+struct StatRow: View {
+	let label: String
+	let value: String
+
+	init(_ label: String, _ value: String) {
+		self.label = label
+		self.value = value
+	}
 
 	var body: some View {
-		Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-			ForEach(rows.indices, id: \.self) { i in
-				GridRow {
-					Text(rows[i].0).foregroundStyle(.secondary)
-					Text(rows[i].1).monospacedDigit()
-				}
-			}
+		InfoRow(label: label) {
+			Text(value).monospacedDigit()
 		}
-		.font(.callout)
 	}
 }
 
+/// The sender's per-second figures, as rows for an ``InfoSection``.
 struct SenderStatsView: View {
 	let stats: SenderSnapshot
 
 	var body: some View {
-		StatGrid(rows: [
-			("Captured", String(format: "%.0f fps", stats.capturedFPS)),
-			("Sent", String(format: "%.0f fps  ·  %.2f Gbps", stats.sentFPS, stats.gigabitsPerSecond)),
-			("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100)),
-			("Superseded", "\(stats.supersededFrames) frames"),
-			("Capture → on glass", stats.latencyP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", stats.latencyP50, stats.latencyP99) : "—"),
-		])
+		StatRow("Captured", String(format: "%.0f fps", stats.capturedFPS))
+		StatRow("Sent", String(format: "%.0f fps  ·  %.2f Gbps", stats.sentFPS, stats.gigabitsPerSecond))
+		StatRow("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100))
+		StatRow("Superseded", "\(stats.supersededFrames) frames")
+		StatRow("Capture → on glass", stats.latencyP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99  ·  %.1f ms max", stats.latencyP50, stats.latencyP99, stats.latencyMax) : "—")
 	}
 }
 

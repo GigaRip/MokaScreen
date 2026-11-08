@@ -25,42 +25,50 @@ struct SenderView: View {
 				}
 			}
 
-			GroupBox {
-				VStack(alignment: .leading, spacing: 10) {
-					if let performance = session.performanceSummary {
-						LabeledContent("Performance", value: performance)
-							.monospacedDigit()
+			InfoSection {
+				if let performance = session.performanceSummary {
+					InfoRow(label: "Performance") {
+						Text(performance).monospacedDigit()
 					}
-					LabeledContent("Display", value: session.displayDescription)
+				}
+				InfoRow("Extended display", session.displayDescription)
+				InfoRow(label: "Shape") {
 					Picker("Shape", selection: $session.shape) {
 						ForEach(DisplayShape.available(on: session.receiverPanel)) { Text($0.title(on: session.receiverPanel)).tag($0) }
 					}
+					.labelsHidden()
+					.fixedSize()
 					.disabled(session.isRunning)
-					LabeledContent("Thunderbolt Bridge", value: model.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
-					if session.receivers.count > 1 {
-						Picker("Receiver", selection: $session.preferredReceiver) {
+				}
+				InfoRow("Thunderbolt", model.bridge.summary)
+				if session.receivers.count > 1 {
+					InfoRow(label: "Display Mac") {
+						Picker("Display Mac", selection: $session.preferredReceiver) {
 							ForEach(session.receivers, id: \.self) { Text($0).tag(Optional($0)) }
 						}
+						.labelsHidden()
+						.fixedSize()
 					}
 				}
-				.padding(6)
 			}
 
 			if showsStatistics {
-				GroupBox {
-					VStack(alignment: .leading, spacing: 10) {
-						SenderStatsView(stats: session.stats)
-						Toggle("Record statistics to a CSV file", isOn: $session.recordsStats)
-							.font(.callout)
-						if let url = session.recordingURL, session.recordsStats {
-							Text(url.path(percentEncoded: false))
-								.font(.caption)
-								.foregroundStyle(.secondary)
-								.textSelection(.enabled)
-						}
+				InfoSection {
+					SenderStatsView(stats: session.stats)
+					BridgeDetailRows(bridge: model.bridge)
+					InfoRow(label: "Record to a CSV file") {
+						Toggle("Record to a CSV file", isOn: $session.recordsStats)
+							.labelsHidden()
+							.toggleStyle(.switch)
+							.controlSize(.small)
 					}
-					.padding(6)
-					.frame(maxWidth: .infinity, alignment: .leading)
+					if let url = session.recordingURL, session.recordsStats {
+						Text(url.path(percentEncoded: false))
+							.font(.caption)
+							.foregroundStyle(.secondary)
+							.textSelection(.enabled)
+							.frame(maxWidth: .infinity, alignment: .leading)
+					}
 				}
 			}
 

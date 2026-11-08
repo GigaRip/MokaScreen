@@ -18,30 +18,17 @@ struct ReceiverView: View {
 		VStack(alignment: .leading, spacing: 18) {
 			RoleHeader(symbol: Role.receiver.symbolName, title: "Display for another Mac", status: session.status.label, isActive: session.status.isShowing)
 
-			GroupBox {
-				VStack(alignment: .leading, spacing: 10) {
-					LabeledContent("Name", value: session.serviceName)
-					LabeledContent("Thunderbolt Bridge", value: model.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")
-					if let addresses = model.bridge?.addresses, !addresses.isEmpty {
-						LabeledContent("Addresses") {
-							Text(addresses.joined(separator: "\n"))
-								.multilineTextAlignment(.trailing)
-								.textSelection(.enabled)
-						}
-					}
-				}
-				.padding(6)
+			InfoSection {
+				InfoRow("Appears as", session.serviceName)
+				InfoRow("Thunderbolt", model.bridge.summary)
 			}
 
 			if showsStatistics {
-				GroupBox {
-					StatGrid(rows: [
-						("Received", String(format: "%.0f fps  ·  %.2f Gbps", session.stats.receivedFPS, session.stats.gigabitsPerSecond)),
-						("Presented", String(format: "%.0f fps", session.stats.presentedFPS)),
-						("Arrival → on glass", session.stats.presentDelayP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", session.stats.presentDelayP50, session.stats.presentDelayP99) : "—"),
-					])
-					.padding(6)
-					.frame(maxWidth: .infinity, alignment: .leading)
+				InfoSection {
+					StatRow("Received", String(format: "%.0f fps  ·  %.2f Gbps", session.stats.receivedFPS, session.stats.gigabitsPerSecond))
+					StatRow("Presented", String(format: "%.0f fps", session.stats.presentedFPS))
+					StatRow("Arrival → on glass", session.stats.presentDelayP50 > 0 ? String(format: "%.1f ms p50  ·  %.1f ms p99", session.stats.presentDelayP50, session.stats.presentDelayP99) : "—")
+					BridgeDetailRows(bridge: model.bridge)
 				}
 			}
 

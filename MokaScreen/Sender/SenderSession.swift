@@ -29,7 +29,7 @@ final class SenderSession {
 
 	private(set) var status: Status = .stopped
 	private(set) var receivers: [String] = []
-	private(set) var displayDescription = "—"
+	private(set) var displayDescription = "Off"
 	/// Refresh rate of the virtual display, while it exists.
 	private(set) var refreshRate: Int?
 	private(set) var stats = SenderSnapshot()
@@ -179,7 +179,7 @@ final class SenderSession {
 		Task { await capturer?.stop() }
 		link.reset()
 		display = nil
-		displayDescription = "—"
+		displayDescription = "Off"
 		refreshRate = nil
 	}
 
@@ -196,7 +196,7 @@ final class SenderSession {
 		link.reset()
 		await capturer?.stop()
 		display = nil
-		displayDescription = "—"
+		displayDescription = "Off"
 		try await startDisplayAndCapture()
 		// stop() may have run while this was suspended.
 		guard isRunning, !Task.isCancelled else {
