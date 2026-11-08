@@ -28,7 +28,7 @@ struct SenderView: View {
 				VStack(alignment: .leading, spacing: 10) {
 					LabeledContent("Display", value: session.displayDescription)
 					Picker("Shape", selection: $session.shape) {
-						ForEach(DisplayShape.allCases) { Text($0.title).tag($0) }
+						ForEach(DisplayShape.available(on: session.receiverPanel)) { Text($0.title(on: session.receiverPanel)).tag($0) }
 					}
 					.disabled(session.isRunning)
 					LabeledContent("Thunderbolt Bridge", value: session.bridge.map { $0.isLinkUp ? "\($0.name) connected" : "\($0.name), no cable" } ?? "Not configured")

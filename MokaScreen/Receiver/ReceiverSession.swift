@@ -44,6 +44,7 @@ final class ReceiverSession {
 	@ObservationIgnored private var advertiser: BonjourAdvertiser?
 	@ObservationIgnored private var connection: Connection?
 	@ObservationIgnored private var statsTimer: Timer?
+	@ObservationIgnored private var screenObserver: NSObjectProtocol?
 	@ObservationIgnored private var presentation: Presentation = .fullScreen
 	@ObservationIgnored private let receiverStats = ReceiverStats()
 
@@ -71,6 +72,14 @@ final class ReceiverSession {
 		monitor = BridgeMonitor { [weak self] state in
 			self?.bridgeChanged(state)
 		}
+		// The sender sizes its virtual display from the advertised geometry, so a resolution
+		// change here must reach it before its next connection.
+		screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+			MainActor.assumeIsolated {
+				guard let self else { return }
+				self.advertiser?.update(txt: Self.panelGeometry().txtFields)
+			}
+		}
 		startStatsTimer()
 	}
 
@@ -89,6 +98,10 @@ final class ReceiverSession {
 	func stop() {
 		monitor?.stop()
 		monitor = nil
+		if let screenObserver {
+			NotificationCenter.default.removeObserver(screenObserver)
+		}
+		screenObserver = nil
 		stopListening()
 		disconnect()
 		statsTimer?.invalidate()
@@ -119,7 +132,7 @@ final class ReceiverSession {
 			listener = try TCPListener(port: Wire.port, scope: .interface(state.index)) { [weak self] stream in
 				Task { @MainActor in self?.accept(stream) }
 			}
-			advertiser = try BonjourAdvertiser(name: serviceName, port: Wire.port, interfaceIndex: state.index)
+			advertiser = try BonjourAdvertiser(name: serviceName, port: Wire.port, interfaceIndex: state.index, txt: Self.panelGeometry().txtFields)
 			if connection == nil { status = .listening }
 			Log.transport.info("Listening on \(state.name, privacy: .public) (index \(state.index, privacy: .public))")
 		} catch {
@@ -225,6 +238,13 @@ final class ReceiverSession {
 		if status != .stopped {
 			status = listener != nil ? .listening : .waitingForCable
 		}
+	}
+
+	/// The geometry of the screen received frames are shown on.
+	private static func panelGeometry() -> PanelGeometry {
+		let geometry = PanelGeometry(screen: builtInScreen())
+		Log.transport.info("Advertising screen \(geometry.width, privacy: .public)×\(geometry.height, privacy: .public) pt @\(geometry.scale, privacy: .public)x, notch \(geometry.notchHeight, privacy: .public) pt, \(geometry.refreshRate, privacy: .public) Hz")
+		return geometry
 	}
 
 	/// The built-in panel if there is one, else the main screen.

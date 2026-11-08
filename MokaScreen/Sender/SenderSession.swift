@@ -45,6 +45,12 @@ final class SenderSession {
 		didSet { UserDefaults.standard.set(shape.rawValue, forKey: "displayShape") }
 	}
 
+	/// The screen of the display Mac last connected to. The virtual display is created at this
+	/// size so that reconnecting to the same Mac never has to rebuild it.
+	private(set) var receiverPanel: PanelGeometry {
+		didSet { UserDefaults.standard.set(try? JSONEncoder().encode(receiverPanel), forKey: "receiverPanel") }
+	}
+
 	/// Write one CSV row per second of activity to `~/Library/Logs/MokaScreen`.
 	var recordsStats = false {
 		didSet { updateRecorder() }
@@ -58,12 +64,16 @@ final class SenderSession {
 	@ObservationIgnored private var statsTimer: Timer?
 	@ObservationIgnored private var recorder: StatsRecorder?
 	@ObservationIgnored private var loopback = false
+	/// Identifies the current virtual display, so a termination callback from one that has
+	/// already been replaced is ignored.
+	@ObservationIgnored private var displayGeneration = 0
 	@ObservationIgnored private let senderStats = SenderStats()
 	@ObservationIgnored private let link = CaptureLink()
 
 	init() {
 		shape = UserDefaults.standard.string(forKey: "displayShape").flatMap(DisplayShape.init) ?? .fullPanel
 		preferredReceiver = UserDefaults.standard.string(forKey: "preferredReceiver")
+		receiverPanel = UserDefaults.standard.data(forKey: "receiverPanel").flatMap { try? JSONDecoder().decode(PanelGeometry.self, from: $0) } ?? .macBookPro16
 	}
 
 	var isRunning: Bool { status != .stopped }
@@ -121,8 +131,10 @@ final class SenderSession {
 	}
 
 	private func startDisplayAndCapture() async throws {
-		let display = try VirtualDisplay(shape: shape) { [weak self] in
-			Task { @MainActor in self?.displayTerminated() }
+		displayGeneration += 1
+		let generation = displayGeneration
+		let display = try VirtualDisplay(panel: receiverPanel, shape: shape) { [weak self] in
+			Task { @MainActor in self?.displayTerminated(generation: generation) }
 		}
 		self.display = display
 		try await display.activate()
@@ -157,8 +169,30 @@ final class SenderSession {
 		displayDescription = "—"
 	}
 
-	private func displayTerminated() {
-		guard isRunning else { return }
+	/// Replaces the virtual display with one sized for `panel`.
+	///
+	/// macOS moves the old display's windows to another screen when it disappears; the new one
+	/// has the same vendor, product, and serial number, so it takes the old one's place in the
+	/// arrangement.
+	private func rebuildDisplay(for panel: PanelGeometry) async throws {
+		Log.display.info("Resizing the virtual display for a \(panel.width, privacy: .public)×\(panel.height, privacy: .public) pt screen")
+		receiverPanel = panel
+		let capturer = capturer
+		self.capturer = nil
+		link.reset()
+		await capturer?.stop()
+		display = nil
+		displayDescription = "—"
+		try await startDisplayAndCapture()
+		// stop() may have run while this was suspended.
+		guard isRunning, !Task.isCancelled else {
+			teardownDisplay()
+			throw CancellationError()
+		}
+	}
+
+	private func displayTerminated(generation: Int) {
+		guard isRunning, generation == displayGeneration else { return }
 		lastError = "macOS removed the virtual display"
 		stop()
 		start(loopback: loopback)
@@ -229,6 +263,7 @@ final class SenderSession {
 		let addresses: [SocketAddress]
 		let name: String
 		let interfaceIndex: UInt32
+		var panel = receiverPanel
 		if loopback {
 			name = "this Mac"
 			interfaceIndex = 0
@@ -242,12 +277,22 @@ final class SenderSession {
 			interfaceIndex = bridge.index
 			status = .connecting(target)
 			do {
-				addresses = try await browser.resolve(target)
+				let service = try await browser.resolve(target)
+				addresses = service.addresses
+				// A receiver that publishes no geometry gets the last known size.
+				panel = PanelGeometry(txtFields: service.txt) ?? receiverPanel
 			} catch {
 				return error
 			}
 		}
 
+		if display?.panel != panel || display?.shape != shape {
+			do {
+				try await rebuildDisplay(for: panel)
+			} catch {
+				return error
+			}
+		}
 		guard let display else { return nil }
 		let size = display.currentPixelSize
 		let hello = HelloMessage(width: UInt32(size.width), height: UInt32(size.height))

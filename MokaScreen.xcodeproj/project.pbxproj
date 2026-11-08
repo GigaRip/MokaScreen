@@ -29,8 +29,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				Sender/CGVirtualDisplayPrivate.h,
-				Sender/MokaScreen-Bridging-Header.h,
 			);
 			target = 000000000000000100000000 /* MokaScreen */;
 		};
@@ -285,7 +283,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MokaScreen;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = "0.1.0";
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gigarip.mokascreen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;
@@ -313,7 +311,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MokaScreen;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = "0.1.0";
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gigarip.mokascreen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = macosx;

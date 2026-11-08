@@ -13,9 +13,13 @@ driver, no kernel extension.
 
 ## Requirements
 
-- Two **M5 Pro or M5 Max MacBook Pro 16"** (3456 × 2234, 120 Hz).
+- Two **MacBook Pro with M5 Pro or M5 Max**, 14-inch or 16-inch, in any combination.
 - **macOS Tahoe 26.2 or later** on both.
 - A **Thunderbolt 5 cable** between them.
+
+A MacBook Pro with the base M5 chip has Thunderbolt 4. MokaScreen works over it, but
+whole-screen changes (switching Spaces, full-screen video) need more than Thunderbolt 4
+networking carries at 120 Hz, so those drop below 120 frames per second.
 
 ## Setting up the two Macs
 
@@ -47,16 +51,25 @@ If your organisation's MDM profile blocks Screen Recording for unlisted apps,
 the sender cannot capture the extended display; ask IT to allow
 `com.gigarip.mokascreen`.
 
-## Display shapes
+## Display size and shape
 
-The virtual display defaults to the full **3456 × 2234** panel, at 120 Hz in
-HiDPI ("looks like 1728 × 1117"), exactly like the built-in screen. The other
-Mac's notch covers a sliver of its menu bar. If that bothers you, choose
-**Below the notch (3456 × 2160)** before starting; the display Mac then shows a
-black band behind the notch.
+The extended display takes the size of the display Mac's screen, so every pixel
+lands on exactly one pixel there: **3456 × 2234** ("looks like 1728 × 1117") from a
+16-inch MacBook Pro, **3024 × 1964** ("looks like 1512 × 982") from a 14-inch one,
+at that screen's refresh rate up to 120 Hz. If the display Mac uses a scaled
+resolution such as *More Space*, the extended display matches that instead.
 
-For a pixel-exact picture, leave the display Mac's own built-in screen at its
-**Default** resolution.
+The display Mac publishes its screen's size, notch, and refresh rate on the
+Thunderbolt Bridge. When the Mac you work on connects to a display Mac whose screen
+differs from the last one, it recreates the extended display at the new size before
+the picture appears: its windows move to your main screen and macOS puts the
+display back where you arranged it. Changing the display Mac's resolution while it
+is showing the picture takes effect the next time it connects; until then the
+picture is scaled to fit.
+
+The display Mac's notch covers a sliver of the extended display's menu bar. If
+that bothers you, choose **Below the notch** before starting; the display Mac then
+shows a black band behind the notch.
 
 ## How it works
 
