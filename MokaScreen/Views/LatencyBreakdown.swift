@@ -122,12 +122,13 @@ struct LatencyBreakdown: View {
 		.frame(height: 64)
 	}
 
-	/// Green within three refreshes, amber within four, red beyond: the floor is about two and a
-	/// half, from macOS handing over the capture, the display Mac's next refresh, and its panel.
+	/// Green within one and a half refreshes, amber within two and a half, red beyond. Drawing on
+	/// arrival puts a frame on the display Mac's next refresh, about one refresh in all; 0.1.8's
+	/// display-link path took about two and a half.
 	private var tint: Color {
 		guard total > 0 else { return .secondary }
-		if total <= frameBudget * 3 { return .green }
-		if total <= frameBudget * 4 { return .orange }
+		if total <= frameBudget * 1.5 { return .green }
+		if total <= frameBudget * 2.5 { return .orange }
 		return .red
 	}
 
@@ -135,7 +136,8 @@ struct LatencyBreakdown: View {
 	static let displayColor = Color.indigo
 }
 
-/// The latest trip as one bar split into its two halves, with a tick at every refresh.
+/// The latest trip as one bar split into its two halves, with a tick at every refresh. The track
+/// spans two refreshes, and grows when a trip takes longer.
 private struct SplitBar: View {
 	let captureAndCable: Double
 	/// Nil before the display Mac's first report.
@@ -144,7 +146,7 @@ private struct SplitBar: View {
 
 	var body: some View {
 		let total = captureAndCable + (display ?? 0)
-		let scale = max(total, frameBudget * 3)
+		let scale = max(total, frameBudget * 2)
 		VStack(alignment: .leading, spacing: 6) {
 			GeometryReader { proxy in
 				let width = proxy.size.width

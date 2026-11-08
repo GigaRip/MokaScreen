@@ -36,11 +36,11 @@ struct WindowSnapshotTests {
 			snapshot.meanCoverage = busy ? 0.031 : 0
 			snapshot.maxCoverage = busy ? 0.2 : 0
 			let wobble = sin(Double(second) / 5) * 1.2
-			snapshot.recentLatency = second < 2 ? 0 : 22 + wobble
-			snapshot.recentLatencyP99 = second < 2 ? 0 : 29 + abs(wobble)
+			snapshot.recentLatency = second < 2 ? 0 : 8.5 + wobble * 0.5
+			snapshot.recentLatencyP99 = second < 2 ? 0 : 16 + abs(wobble)
 			snapshot.latencyMax = busy ? 31 : 0
-			snapshot.displayDelay = second < 3 ? 0 : 15.5 + wobble * 0.6
-			snapshot.displayDelayP99 = second < 3 ? 0 : 19
+			snapshot.displayDelay = second < 3 ? 0 : 6.5 + wobble * 0.3
+			snapshot.displayDelayP99 = second < 3 ? 0 : 12
 			snapshot.displayPresentedFPS = busy ? 118 : 0
 			history.append(snapshot)
 		}
