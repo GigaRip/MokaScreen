@@ -106,6 +106,10 @@ final class ReceiverSession {
 		disconnect()
 		statsTimer?.invalidate()
 		statsTimer = nil
+		// Without the timer nothing refreshes the snapshot, so clear it rather than leave the
+		// last second's rates on screen beside "Stopped".
+		_ = receiverStats.drain()
+		stats = ReceiverSnapshot()
 		status = .stopped
 	}
 

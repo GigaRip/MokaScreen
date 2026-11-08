@@ -15,7 +15,7 @@ struct ReceiverView: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 18) {
-			RoleHeader(symbol: "display", title: "Display for another Mac", status: session.status.label, isActive: session.status.isShowing)
+			RoleHeader(symbol: Role.receiver.symbolName, title: "Display for another Mac", status: session.status.label, isActive: session.status.isShowing)
 
 			GroupBox {
 				VStack(alignment: .leading, spacing: 10) {

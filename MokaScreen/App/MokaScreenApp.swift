@@ -57,6 +57,15 @@ enum Role: String {
 	case sender
 	/// The Mac whose screen shows the other Mac's extended display.
 	case receiver
+
+	/// The SF Symbol for this role. `Image(systemName:)` draws nothing for an unknown name and
+	/// reports no error, so the names are checked by a test.
+	var symbolName: String {
+		switch self {
+		case .sender: "display.2"
+		case .receiver: "display"
+		}
+	}
 }
 
 /// App-wide state: the chosen role, remembered across launches, and the session for it.

@@ -122,6 +122,10 @@ final class SenderSession {
 		receivers = []
 		statsTimer?.invalidate()
 		statsTimer = nil
+		// Without the timer nothing refreshes the snapshot, so clear it rather than leave the
+		// last second's rates on screen beside "Stopped".
+		_ = senderStats.drain()
+		stats = SenderSnapshot()
 		teardownDisplay()
 		status = .stopped
 	}

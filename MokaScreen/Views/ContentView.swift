@@ -40,12 +40,12 @@ private struct RoleChooser: View {
 				.multilineTextAlignment(.center)
 			HStack(spacing: 16) {
 				RoleButton(
-					symbol: "macbook.and.arrow.right",
+					symbol: Role.sender.symbolName,
 					title: "Extend this Mac",
 					detail: "This is the Mac I work on. Add a display that appears on the other Mac."
 				) { model.start(.sender) }
 				RoleButton(
-					symbol: "display",
+					symbol: Role.receiver.symbolName,
 					title: "Be the display",
 					detail: "Use this Mac's screen as the other Mac's extended display."
 				) { model.start(.receiver) }

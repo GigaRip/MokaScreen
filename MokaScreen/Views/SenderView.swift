@@ -15,7 +15,7 @@ struct SenderView: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 18) {
-			RoleHeader(symbol: "macbook.and.arrow.right", title: "Extending this Mac", status: session.status.label, isActive: session.status.isConnected)
+			RoleHeader(symbol: Role.sender.symbolName, title: "Extending this Mac", status: session.status.label, isActive: session.status.isConnected)
 
 			if session.status == .needsPermission {
 				PermissionCallout {
