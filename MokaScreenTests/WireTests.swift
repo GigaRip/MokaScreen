@@ -19,6 +19,12 @@ struct WireTests {
 		return try decode(buffer)
 	}
 
+	@Test(arguments: [true, false])
+	func statisticsRoundTrips(visible: Bool) throws {
+		let message = StatisticsMessage(visible: visible)
+		#expect(try roundTrip(message.encode, StatisticsMessage.decode) == message)
+	}
+
 	@Test func helloRoundTrips() throws {
 		let hello = HelloMessage(width: 3456, height: 2234)
 		#expect(try roundTrip(hello.encode, HelloMessage.decode) == hello)

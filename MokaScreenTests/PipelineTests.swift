@@ -110,6 +110,24 @@ private func expectedImage(width: Int, height: Int, fill: (Int, Int) -> UInt32) 
 
 private enum TestError: Error { case setup }
 
+/// Show Statistics values one side received, in order.
+private final class StatisticsLog: @unchecked Sendable {
+	private let lock = NSLock()
+	private let arrived = DispatchSemaphore(value: 0)
+	private var values: [Bool] = []
+
+	func record(_ visible: Bool) {
+		lock.withLock { values.append(visible) }
+		arrived.signal()
+	}
+
+	/// The next value received, or nil after a timeout.
+	func next() -> Bool? {
+		guard arrived.wait(timeout: .now() + 5) == .success else { return nil }
+		return lock.withLock { values.removeFirst() }
+	}
+}
+
 /// A connected sender/receiver pair over loopback TCP.
 private struct Loopback {
 	let sink = MemorySink()
@@ -117,8 +135,11 @@ private struct Loopback {
 	let sender: FrameSender
 	let senderStats = SenderStats()
 	let listener: TCPListener
+	/// Show Statistics values each side heard from the other.
+	let senderHeard = StatisticsLog()
+	let receiverHeard = StatisticsLog()
 
-	init(width: Int, height: Int) throws {
+	init(width: Int, height: Int, showsStatistics: Bool = false) throws {
 		let port = UInt16.random(in: 48_000...58_000)
 		let accepted = DispatchSemaphore(value: 0)
 		var serverStream: TCPStream?
@@ -131,13 +152,13 @@ private struct Loopback {
 
 		let receiverStats = ReceiverStats()
 		let hello = DispatchSemaphore(value: 0)
-		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, onHello: { _ in hello.signal() }, onClose: { _ in })
+		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, onHello: { _ in hello.signal() }, onStatistics: { [receiverHeard] in receiverHeard.record($0) }, onClose: { _ in })
 		receiver.start()
 		try client.writeHeader { HelloMessage(width: UInt32(width), height: UInt32(height)).encode(into: $0) }
 		_ = try client.readHeader(HelloAckMessage.decode)
 		guard hello.wait(timeout: .now() + 5) == .success else { throw TestError.setup }
 
-		sender = FrameSender(stream: client, width: width, height: height, stats: senderStats) { _ in }
+		sender = FrameSender(stream: client, width: width, height: height, stats: senderStats, showsStatistics: showsStatistics, onStatistics: { [senderHeard] in senderHeard.record($0) }) { _ in }
 		let receiver = receiver
 		sink.onCommit = { receiver.reportPresented(frameID: $0) }
 	}
@@ -177,6 +198,29 @@ struct PipelineTests {
 		#expect(stats.latencyP50 > 0)
 		#expect(stats.maxCoverage == 1)
 		#expect(stats.meanCoverage < 1)
+	}
+
+	@Test func statisticsSettingTravelsBothWaysBetweenFrames() throws {
+		let (width, height) = (64, 48)
+		let loopback = try Loopback(width: width, height: height, showsStatistics: true)
+		defer { loopback.close() }
+		let fill: (Int, Int) -> UInt32 = { x, y in UInt32(truncatingIfNeeded: x &* 31 ^ y) | 0xFF00_0000 }
+		let frame = try makeFrame(width: width, height: height, fill: fill, dirty: [])
+
+		// The sender's own setting reaches the receiver as soon as it connects.
+		#expect(loopback.receiverHeard.next() == true)
+		loopback.sender.submit(frame)
+		#expect(loopback.sink.waitForFrame())
+
+		loopback.receiver.sendStatistics(visible: false)
+		#expect(loopback.senderHeard.next() == false)
+		loopback.sender.sendStatistics(visible: true)
+		#expect(loopback.receiverHeard.next() == true)
+
+		// Frames still arrive intact after messages between them in both directions.
+		loopback.sender.submit(try makeFrame(width: width, height: height, fill: fill, dirty: [CGRect(x: 0, y: 0, width: width, height: height)]))
+		#expect(loopback.sink.waitForFrame())
+		#expect(loopback.sink.snapshot() == expectedImage(width: width, height: height, fill: fill))
 	}
 
 	@Test func fullFrameThroughputOverLoopback() throws {

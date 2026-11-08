@@ -17,12 +17,16 @@ import Foundation
 ///
 /// A session is: sender → `hello`, receiver → `helloAck`, then the sender
 /// streams frames (`frameBegin` followed by exactly `rectCount` × `rect`) while
-/// the receiver reports each frame it puts on glass with `presented`.
+/// the receiver reports each frame it puts on glass with `presented`. Either side
+/// may send `statistics` between frames to change the other's Show Statistics
+/// setting; the sender sends its own right after the handshake. A side ignores a
+/// header type it does not know, outside a frame, so a later message type that
+/// carries no payload does not need a version change.
 enum Wire {
 	/// `"MKSC"` read as a little-endian word.
 	static let magic: UInt32 = 0x4353_4B4D
 	/// Bumped on any incompatible change; peers with different versions refuse each other.
-	static let version: UInt32 = 1
+	static let version: UInt32 = 2
 	/// Size of every message header, in bytes.
 	static let headerSize = 32
 	/// TCP port the receiver listens on.
@@ -42,6 +46,7 @@ enum MessageType: UInt32 {
 	case frameBegin = 3
 	case rect = 4
 	case presented = 5
+	case statistics = 6
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -210,6 +215,22 @@ struct PresentedMessage: Equatable {
 	static func decode(_ p: UnsafeRawPointer) throws -> PresentedMessage {
 		try WireHeader.expect(.presented, p)
 		return PresentedMessage(frameID: WireHeader.load64(p, 8))
+	}
+}
+
+/// Either direction: show or hide the statistics panels, so both Macs follow one setting.
+struct StatisticsMessage: Equatable {
+	var visible: Bool
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.statistics.rawValue, p, 0)
+		WireHeader.store(UInt32(visible ? 1 : 0), p, 4)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> StatisticsMessage {
+		try WireHeader.expect(.statistics, p)
+		return StatisticsMessage(visible: WireHeader.load32(p, 4) != 0)
 	}
 }
 

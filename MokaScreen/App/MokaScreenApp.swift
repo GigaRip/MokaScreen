@@ -60,6 +60,42 @@ struct MokaScreenApp: App {
 /// stays on across launches until turned off.
 enum StatisticsPreference {
 	static let key = "showsStatistics"
+
+	static var isOn: Bool {
+		get { UserDefaults.standard.bool(forKey: key) }
+		set { UserDefaults.standard.set(newValue, forKey: key) }
+	}
+}
+
+/// Keeps Show Statistics the same on both Macs while they are connected: a change on this Mac
+/// is sent to the other, and one received from it is applied here without being sent back.
+@MainActor
+final class StatisticsSync {
+	private var observer: NSObjectProtocol?
+	/// The value last sent or received, so applying a received change does not echo it back.
+	private var lastSeen = StatisticsPreference.isOn
+	private let send: (Bool) -> Void
+
+	/// - Parameter send: Sends a change to the other Mac; does nothing when not connected.
+	init(send: @escaping (Bool) -> Void) {
+		self.send = send
+		observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+			MainActor.assumeIsolated { self?.localChange() }
+		}
+	}
+
+	/// Applies the other Mac's setting here.
+	func receive(_ visible: Bool) {
+		lastSeen = visible
+		StatisticsPreference.isOn = visible
+	}
+
+	private func localChange() {
+		let visible = StatisticsPreference.isOn
+		guard visible != lastSeen else { return }
+		lastSeen = visible
+		send(visible)
+	}
 }
 
 /// Which side of the cable this Mac is on.

@@ -43,6 +43,60 @@ struct WindowSnapshotTests {
 		model.sender.applySnapshotState(status: .stopped)
 	}
 
+	@Test(.enabled(if: directory != nil))
+	func renderStatisticsOverlay() throws {
+		let directory = URL(fileURLWithPath: try #require(Self.directory))
+		for (name, base) in [("green", 5.6), ("amber", 11.0)] {
+			var history: [ReceiverSnapshot] = []
+			for second in 0..<StatisticsPanelContent.historyLength {
+				var snapshot = ReceiverSnapshot()
+				snapshot.interval = 1
+				snapshot.receivedFrames = 118
+				snapshot.presentedFrames = 120
+				snapshot.bytes = 310_000_000
+				let wobble = sin(Double(second) / 4) * 0.9 + (second == 41 ? 3.5 : 0)
+				snapshot.presentDelayP50 = base + wobble
+				snapshot.presentDelayP99 = base + 2.8 + abs(wobble) * 1.6
+				history.append(snapshot)
+			}
+			try renderPanel(StatisticsPanelContent(receiver: history.last!, history: history, refreshRate: 120, source: "3456 × 2234"), to: directory.appending(path: "overlay-\(name).png"))
+		}
+
+		var senderHistory: [SenderSnapshot] = []
+		for second in 0..<StatisticsPanelContent.historyLength {
+			var snapshot = SenderSnapshot()
+			snapshot.interval = 1
+			snapshot.capturedFrames = 120
+			snapshot.sentFrames = 118
+			snapshot.bytes = 300_000_000
+			snapshot.meanCoverage = 0.031
+			let wobble = sin(Double(second) / 5) * 1.6
+			snapshot.latencyP50 = 21.5 + wobble
+			snapshot.latencyP99 = 26 + abs(wobble) * 2
+			senderHistory.append(snapshot)
+		}
+		try renderPanel(StatisticsPanelContent(sender: senderHistory.last!, history: senderHistory, refreshRate: 120, display: "3456 × 2234"), to: directory.appending(path: "overlay-sender.png"))
+	}
+
+	private func renderPanel(_ content: StatisticsPanelContent, to url: URL) throws {
+		do {
+			let panel = StatisticsPanel(content: content)
+				.padding(40)
+				.background {
+					// Stands in for the shared screen behind the panel.
+					LinearGradient(colors: [.indigo, .teal, .orange], startPoint: .topLeading, endPoint: .bottomTrailing)
+				}
+			let host = NSHostingView(rootView: panel)
+			host.frame = NSRect(origin: .zero, size: host.fittingSize)
+			let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+			window.contentView = host
+			host.layoutSubtreeIfNeeded()
+			let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+			host.cacheDisplay(in: host.bounds, to: rep)
+			try #require(rep.representation(using: .png, properties: [:])).write(to: url)
+		}
+	}
+
 	/// Renders `view` the way ``ContentView`` lays it out: fixed width, natural height.
 	private func render(_ view: some View, model: AppModel, defaults: UserDefaults, to url: URL) throws {
 		let root = view

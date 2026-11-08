@@ -73,11 +73,18 @@ final class SenderSession {
 	@ObservationIgnored private var displayGeneration = 0
 	@ObservationIgnored private let senderStats = SenderStats()
 	@ObservationIgnored private let link = CaptureLink()
+	@ObservationIgnored private var statisticsSync: StatisticsSync!
+	@ObservationIgnored private var statisticsWindow: StatisticsWindow?
+	/// The last minute of per-second statistics while connected, oldest first.
+	private(set) var history: [SenderSnapshot] = []
+	/// The virtual display's size in pixels, such as "3456 × 2234", while it exists.
+	private(set) var displaySize: String?
 
 	init() {
 		shape = UserDefaults.standard.string(forKey: "displayShape").flatMap(DisplayShape.init) ?? .fullPanel
 		preferredReceiver = UserDefaults.standard.string(forKey: "preferredReceiver")
 		receiverPanel = UserDefaults.standard.data(forKey: "receiverPanel").flatMap { try? JSONDecoder().decode(PanelGeometry.self, from: $0) } ?? .macBookPro16
+		statisticsSync = StatisticsSync { [link] visible in link.sendStatistics(visible) }
 	}
 
 	var isRunning: Bool { status != .stopped }
@@ -109,6 +116,7 @@ final class SenderSession {
 		status = .starting
 		lastError = nil
 		startStatsTimer()
+		statisticsWindow = StatisticsWindow(session: self)
 		Task {
 			do {
 				try await startDisplayAndCapture()
@@ -141,8 +149,11 @@ final class SenderSession {
 		browser?.stop()
 		browser = nil
 		receivers = []
+		statisticsWindow?.close()
+		statisticsWindow = nil
 		statsTimer?.invalidate()
 		statsTimer = nil
+		history = []
 		// Without the timer nothing refreshes the snapshot, so clear it rather than leave the
 		// last second's rates on screen beside "Stopped".
 		_ = senderStats.drain()
@@ -161,6 +172,7 @@ final class SenderSession {
 		try await display.activate()
 		displayDescription = display.currentModeDescription
 		refreshRate = Int(display.refreshRate.rounded())
+		displaySize = "\(display.pixelSize.width) × \(display.pixelSize.height)"
 		try await startCapture()
 	}
 
@@ -190,6 +202,7 @@ final class SenderSession {
 		display = nil
 		displayDescription = "Off"
 		refreshRate = nil
+		displaySize = nil
 	}
 
 	/// Replaces the virtual display with one sized for `panel`.
@@ -336,11 +349,14 @@ final class SenderSession {
 		}
 
 		let closed = AsyncStream<Error>.makeStream()
-		let sender = FrameSender(stream: stream, width: size.width, height: size.height, stats: senderStats) { error in
+		let sender = FrameSender(stream: stream, width: size.width, height: size.height, stats: senderStats, showsStatistics: StatisticsPreference.isOn, onStatistics: { [weak self] visible in
+			Task { @MainActor in self?.statisticsSync.receive(visible) }
+		}) { error in
 			closed.continuation.yield(error)
 			closed.continuation.finish()
 		}
 		senderStats.resetRecent()
+		history = []
 		link.setSender(sender)
 		status = .connected(name)
 		lastError = nil
@@ -381,6 +397,10 @@ final class SenderSession {
 			MainActor.assumeIsolated {
 				guard let self else { return }
 				self.stats = self.senderStats.drain()
+				if case .connected = self.status {
+					self.history.append(self.stats)
+					self.history.removeFirst(max(0, self.history.count - StatisticsPanelContent.historyLength))
+				}
 				if case .connected = self.status {
 					self.recorder?.append(self.stats)
 				}
@@ -437,5 +457,10 @@ private final class CaptureLink: @unchecked Sendable {
 	func reset() {
 		setSender(nil)
 		lock.withLock { latest = nil }
+	}
+
+	/// Forwards a Show Statistics change to the receiver, if connected.
+	func sendStatistics(_ visible: Bool) {
+		lock.withLock { sender }?.sendStatistics(visible: visible)
 	}
 }

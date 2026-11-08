@@ -77,6 +77,17 @@ extension PanelGeometry {
 
 // MARK: - Reading a screen
 
+extension NSScreen {
+	/// The built-in panel if there is one, else the main screen.
+	@MainActor
+	static var builtIn: NSScreen {
+		screens.first { screen in
+			guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+			return CGDisplayIsBuiltin(number.uint32Value) != 0
+		} ?? main ?? screens[0]
+	}
+}
+
 extension PanelGeometry {
 	/// The geometry of `screen` in its current mode.
 	@MainActor

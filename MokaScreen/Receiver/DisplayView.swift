@@ -36,6 +36,12 @@ final class MetalLayerView: NSView {
 		fatalError()
 	}
 
+	// The view is resized by its container's autoresizing, which does not always schedule layout().
+	override func setFrameSize(_ newSize: NSSize) {
+		super.setFrameSize(newSize)
+		updateDrawableSize()
+	}
+
 	override func layout() {
 		super.layout()
 		updateDrawableSize()

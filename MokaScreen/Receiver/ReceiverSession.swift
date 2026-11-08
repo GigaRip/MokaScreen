@@ -35,6 +35,13 @@ final class ReceiverSession {
 
 	private(set) var status: Status = .stopped
 	private(set) var stats = ReceiverSnapshot()
+	/// The last minute of per-second statistics while showing, oldest first, for the overlay's chart.
+	private(set) var history: [ReceiverSnapshot] = []
+	/// The incoming picture's size in pixels, such as "3456 × 2234", while showing.
+	private(set) var sourceSize: String?
+	/// The refresh rate of the screen the picture is shown on.
+	private(set) var displayRate = 120
+
 	/// The name this Mac advertises to senders.
 	let serviceName = ReceiverSession.computerName()
 
@@ -49,6 +56,13 @@ final class ReceiverSession {
 	@ObservationIgnored private var screenObserver: NSObjectProtocol?
 	@ObservationIgnored private var presentation: Presentation = .fullScreen
 	@ObservationIgnored private let receiverStats = ReceiverStats()
+	@ObservationIgnored private var statisticsSync: StatisticsSync!
+
+	init() {
+		statisticsSync = StatisticsSync { [weak self] visible in
+			self?.connection?.receiver.sendStatistics(visible: visible)
+		}
+	}
 
 	/// Everything that exists for one sender's connection.
 	private final class Connection {
@@ -57,6 +71,7 @@ final class ReceiverSession {
 		var window: NSWindow?
 		var driver: DisplayLinkDriver?
 		var activity: NSObjectProtocol?
+		var overlay: StatisticsOverlayView?
 
 		init(receiver: FrameReceiver, renderer: FrameRenderer) {
 			self.receiver = receiver
@@ -119,6 +134,10 @@ final class ReceiverSession {
 			MainActor.assumeIsolated {
 				guard let self else { return }
 				self.stats = self.receiverStats.drain()
+				if case .showing = self.status {
+					self.history.append(self.stats)
+					self.history.removeFirst(max(0, self.history.count - StatisticsPanelContent.historyLength))
+				}
 			}
 		}
 	}
@@ -178,6 +197,8 @@ final class ReceiverSession {
 				guard let self, self.connection === connection else { return }
 				self.show(connection, peer: stream.peerDescription, hello: hello)
 			}
+		}, onStatistics: { [weak self] visible in
+			Task { @MainActor in self?.statisticsSync.receive(visible) }
 		}, onClose: { [weak self] error in
 			Log.transport.info("Sender disconnected: \(String(describing: error), privacy: .public)")
 			Task { @MainActor in
@@ -196,6 +217,11 @@ final class ReceiverSession {
 	private func show(_ connection: Connection, peer: String, hello: HelloMessage) {
 		let view = MetalLayerView(device: connection.renderer.device)
 		view.onDrawableResize = { [weak renderer = connection.renderer] in renderer?.setNeedsRedraw() }
+		// The Metal view hosts its layer, and a layer-hosting view cannot have subviews, so the
+		// statistics overlay is its sibling in a plain container.
+		let container = NSView()
+		container.addSubview(view)
+		view.autoresizingMask = [.width, .height]
 
 		let window: NSWindow
 		switch presentation {
@@ -210,6 +236,10 @@ final class ReceiverSession {
 			window = fullScreen
 			NSApp.presentationOptions = [.hideDock, .hideMenuBar]
 			NSCursor.hide()
+			let overlay = StatisticsOverlayView(session: self)
+			overlay.autoresizingMask = [.width, .height]
+			container.addSubview(overlay)
+			connection.overlay = overlay
 		case .window:
 			window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Int(hello.width) / 4, height: Int(hello.height) / 4), styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
 			window.title = "MokaScreen Loopback"
@@ -218,7 +248,9 @@ final class ReceiverSession {
 		}
 		window.isReleasedWhenClosed = false
 		window.backgroundColor = .black
-		window.contentView = view
+		window.contentView = container
+		view.frame = container.bounds
+		connection.overlay?.frame = container.bounds
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
 
@@ -228,12 +260,17 @@ final class ReceiverSession {
 		connection.driver = driver
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
+		history = []
+		sourceSize = "\(hello.width) × \(hello.height)"
+		displayRate = max(60, window.screen?.maximumFramesPerSecond ?? 120)
 		status = .showing(peer: peer)
 	}
 
 	private func disconnect() {
 		guard let connection else { return }
 		self.connection = nil
+		history = []
+		sourceSize = nil
 		connection.receiver.stop()
 		connection.renderer.shutDown()
 		connection.driver?.stop()
@@ -259,12 +296,8 @@ final class ReceiverSession {
 		return geometry
 	}
 
-	/// The built-in panel if there is one, else the main screen.
 	private static func builtInScreen() -> NSScreen {
-		NSScreen.screens.first { screen in
-			guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
-			return CGDisplayIsBuiltin(number.uint32Value) != 0
-		} ?? NSScreen.main ?? NSScreen.screens[0]
+		NSScreen.builtIn
 	}
 
 	private static func computerName() -> String {

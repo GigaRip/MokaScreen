@@ -29,21 +29,30 @@ final class FrameSender {
 	private let stats: SenderStats
 	private let condition = NSCondition()
 	private var pending: CapturedFrame?
+	/// A Show Statistics change waiting to go out ahead of the next frame.
+	private var pendingStatistics: Bool?
 	private var dirty: DirtyRegion
 	private var running = true
 	private var nextFrameID: UInt64 = 1
 	private let onClose: (Error) -> Void
+	private let onStatistics: (Bool) -> Void
 	/// Capture time of each recent frame, so `presented` acknowledgements yield latency.
 	private let inflight = InflightFrames()
 
 	/// Starts the send and acknowledgement threads on a stream that has completed the handshake.
-	/// - Parameter onClose: Called once, from a background thread, when the connection fails.
-	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, onClose: @escaping (Error) -> Void) {
+	/// - Parameters:
+	///   - showsStatistics: This Mac's Show Statistics setting, sent before the first frame so
+	///     the receiver starts out matching it.
+	///   - onStatistics: Called from a background thread when the receiver changes the setting.
+	///   - onClose: Called once, from a background thread, when the connection fails.
+	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, showsStatistics: Bool, onStatistics: @escaping (Bool) -> Void, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.width = width
 		self.height = height
 		self.stats = stats
+		self.onStatistics = onStatistics
 		self.onClose = onClose
+		pendingStatistics = showsStatistics
 		dirty = DirtyRegion(width: width, height: height)
 		dirty.insertAll()
 
@@ -72,6 +81,15 @@ final class FrameSender {
 		condition.unlock()
 	}
 
+	/// Tells the receiver to show or hide its statistics. Thread-safe; the message goes out on the
+	/// send thread so it never lands inside a frame.
+	func sendStatistics(visible: Bool) {
+		condition.lock()
+		pendingStatistics = visible
+		condition.signal()
+		condition.unlock()
+	}
+
 	/// Closes the connection and stops both threads.
 	func stop() {
 		condition.lock()
@@ -92,8 +110,19 @@ final class FrameSender {
 
 		while true {
 			condition.lock()
-			while running && (pending == nil || dirty.isEmpty) {
+			while running && pendingStatistics == nil && (pending == nil || dirty.isEmpty) {
 				condition.wait()
+			}
+			if running, let visible = pendingStatistics {
+				pendingStatistics = nil
+				condition.unlock()
+				do {
+					try stream.writeHeader { StatisticsMessage(visible: visible).encode(into: $0) }
+				} catch {
+					fail(error)
+					return
+				}
+				continue
 			}
 			guard running, let frame = pending else {
 				condition.unlock()
@@ -173,9 +202,16 @@ final class FrameSender {
 	private func ackLoop() {
 		while true {
 			do {
-				let presented = try stream.readHeader(PresentedMessage.decode)
-				if let captureTime = inflight.take(upTo: presented.frameID) {
-					stats.recordPresented(latency: Double(HostClock.now &- captureTime) / 1e9)
+				let message = try stream.readHeader(ReceiverMessage.decode)
+				switch message {
+				case .presented(let presented):
+					if let captureTime = inflight.take(upTo: presented.frameID) {
+						stats.recordPresented(latency: Double(HostClock.now &- captureTime) / 1e9)
+					}
+				case .statistics(let statistics):
+					onStatistics(statistics.visible)
+				case .unknown:
+					break
 				}
 			} catch {
 				fail(error)
@@ -193,6 +229,21 @@ final class FrameSender {
 		stream.close()
 		if wasRunning {
 			onClose(error)
+		}
+	}
+}
+
+/// A message from the receiver.
+private enum ReceiverMessage {
+	case presented(PresentedMessage)
+	case statistics(StatisticsMessage)
+	case unknown
+
+	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
+		switch MessageType(rawValue: WireHeader.type(p)) {
+		case .presented: .presented(try PresentedMessage.decode(p))
+		case .statistics: .statistics(try StatisticsMessage.decode(p))
+		default: .unknown
 		}
 	}
 }
