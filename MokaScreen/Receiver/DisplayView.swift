@@ -63,9 +63,14 @@ final class MetalLayerView: NSView {
 /// frame's arrival and the glass than expected: at a steady 100+ fps the display Mac's share
 /// measured 20 ms against 12.5 ms for an average half-refresh wait plus one refresh. Presenting on
 /// arrival removes the wait for the tick and lets ProMotion refresh the panel as soon as the frame
-/// is ready. At most one drawable is in flight, so frames that arrive while it waits for the glass
-/// are folded into the next draw instead of queuing behind it.
+/// is ready.
+///
+/// Up to two drawables are in flight. With one, the display Mac's share alternated between about
+/// 7 ms and about 23 ms under the same 120 fps load: when macOS took two refreshes to show a
+/// drawable, each frame waited for the previous one and frames were drawn in pairs. Frames that
+/// arrive while both are in flight are folded into the next draw instead of queuing behind them.
 final class PresentationDriver {
+	static let maxInFlight = 2
 	/// How long to wait for a drawable to be reported presented before drawing anyway, so a report
 	/// that never comes cannot freeze the screen.
 	private static let presentTimeout: TimeInterval = 0.1
@@ -73,12 +78,12 @@ final class PresentationDriver {
 	private let layer: CAMetalLayer
 	private let renderer: FrameRenderer
 	private let wake = DispatchSemaphore(value: 0)
-	/// Guards `stopped`, `inFlight`, and `generation`, and signals when a drawable is presented.
+	/// Guards `stopped`, `inFlight`, and `epoch`, and signals when a drawable is presented.
 	private let condition = NSCondition()
 	private var stopped = false
-	private var inFlight = false
-	/// Identifies the drawable in flight, so a report arriving after its timeout cannot clear the next one.
-	private var generation = 0
+	private var inFlight = 0
+	/// Advances when a timeout clears `inFlight`, so reports for drawables from before it are ignored.
+	private var epoch = 0
 
 	init(layer: CAMetalLayer, renderer: FrameRenderer) {
 		self.layer = layer
@@ -107,12 +112,11 @@ final class PresentationDriver {
 	private func run() {
 		while true {
 			wake.wait()
-			guard waitForGlass() else { return }
+			guard waitForRoom() else { return }
 			guard renderer.hasWork, let drawable = layer.nextDrawable() else { continue }
 			let current = condition.withLock {
-				generation &+= 1
-				inFlight = true
-				return generation
+				inFlight += 1
+				return epoch
 			}
 			let presented = renderer.draw(to: drawable) { [weak self] in self?.presented(current) }
 			if !presented {
@@ -121,23 +125,25 @@ final class PresentationDriver {
 		}
 	}
 
-	/// Waits until no drawable is in flight, or the timeout passes. Returns false once stopped.
-	private func waitForGlass() -> Bool {
+	/// Waits until fewer than ``maxInFlight`` drawables are in flight, or the timeout passes.
+	/// Returns false once stopped.
+	private func waitForRoom() -> Bool {
 		condition.withLock {
 			let deadline = Date(timeIntervalSinceNow: Self.presentTimeout)
-			while inFlight, !stopped {
+			while inFlight >= Self.maxInFlight, !stopped {
 				if !condition.wait(until: deadline) {
-					inFlight = false
+					inFlight = 0
+					epoch &+= 1
 				}
 			}
 			return !stopped
 		}
 	}
 
-	private func presented(_ drawable: Int) {
+	private func presented(_ drawableEpoch: Int) {
 		condition.withLock {
-			guard drawable == generation else { return }
-			inFlight = false
+			guard drawableEpoch == epoch, inFlight > 0 else { return }
+			inFlight -= 1
 			condition.signal()
 		}
 	}

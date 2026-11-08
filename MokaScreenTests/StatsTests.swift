@@ -59,6 +59,27 @@ struct StatsTests {
 		#expect(stats.drain().displayDelay == 0)
 	}
 
+	@Test func drawsCountDrawablesAndWaitsCountFrames() {
+		let stats = ReceiverStats()
+		let now: UInt64 = 1_000_000_000
+		// Two frames folded into one draw, then one frame drawn on its own.
+		stats.recordDraw(receivedTimes: [now - 9_000_000, now - 1_000_000], at: now)
+		stats.recordDraw(receivedTimes: [now - 2_000_000], at: now)
+		let snapshot = stats.drain()
+		#expect(snapshot.draws == 2)
+		#expect(snapshot.recentWait == 2)
+		#expect(DisplayReportMessage(snapshot).draws == 2)
+		#expect(DisplayReportMessage(snapshot).waitP50Micros == 2_000)
+	}
+
+	@Test func displayReportCarriesDrawsAndWait() {
+		let stats = SenderStats()
+		stats.recordDisplayReport(DisplayReportMessage(delayP50Micros: 7_000, delayP99Micros: 9_000, receivedFrames: 120, presentedFrames: 120, intervalMillis: 1000, draws: 60, waitP50Micros: 6_500))
+		let snapshot = stats.drain()
+		#expect(snapshot.displayDrawsPerSecond == 60)
+		#expect(snapshot.displayWait == 6.5)
+	}
+
 	@Test func resetForgetsRecentLatency() {
 		let stats = SenderStats()
 		stats.recordPresented(latency: 0.030)

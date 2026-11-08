@@ -233,6 +233,8 @@ final class FrameRenderer: FrameSink {
 			return false
 		}
 		surface.hasContent = true
+		let receivedTimes = current.map(\.receivedTime)
+		stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
 		if !current.isEmpty, let blit = commandBuffer.makeBlitCommandEncoder() {
 			for frame in current {
 				let buffer = frame.slot.owner as! MTLBuffer
@@ -269,7 +271,6 @@ final class FrameRenderer: FrameSink {
 		}
 
 		let newest = current.last?.frameID
-		let receivedTimes = current.map(\.receivedTime)
 		let stats = stats
 		let onPresented = onPresented
 		drawable.addPresentedHandler { drawable in

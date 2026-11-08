@@ -26,7 +26,7 @@ struct WireTests {
 	}
 
 	@Test func displayReportRoundTrips() throws {
-		let report = DisplayReportMessage(delayP50Micros: 15_480, delayP99Micros: 19_020, receivedFrames: 118, presentedFrames: 120, intervalMillis: 1003)
+		let report = DisplayReportMessage(delayP50Micros: 15_480, delayP99Micros: 19_020, receivedFrames: 118, presentedFrames: 120, intervalMillis: 1003, draws: 61, waitP50Micros: 6_250)
 		#expect(try roundTrip(report.encode, DisplayReportMessage.decode) == report)
 	}
 

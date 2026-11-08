@@ -38,12 +38,18 @@ struct SenderSnapshot: Equatable {
 	var displayDelayP99 = 0.0
 	/// Frames the display Mac put on screen per second, from its last report.
 	var displayPresentedFPS = 0.0
+	/// Drawables the display Mac presented per second, from its last report. Fewer draws than
+	/// frames means frames waited and were folded together.
+	var displayDrawsPerSecond = 0.0
+	/// The display Mac's rolling median from a frame's last byte arriving to its draw starting,
+	/// in milliseconds, from its last report.
+	var displayWait = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
 	var gigabitsPerSecond: Double { interval > 0 ? Double(bytes) * 8 / interval / 1e9 : 0 }
 
-	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps"
+	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms"
 
 	func csvRow(at date: Date) -> String {
 		let rectsPerFrame = sentFrames > 0 ? Double(rects) / Double(sentFrames) : 0
@@ -56,6 +62,7 @@ struct SenderSnapshot: Equatable {
 			String(format: "%.2f", latencyP50), String(format: "%.2f", latencyP99), String(format: "%.2f", latencyMax),
 			String(format: "%.2f", recentLatency),
 			String(format: "%.2f", displayDelay), String(format: "%.2f", displayDelayP99), String(format: "%.1f", displayPresentedFPS),
+			String(format: "%.1f", displayDrawsPerSecond), String(format: "%.2f", displayWait),
 		].joined(separator: ",")
 	}
 }
@@ -132,6 +139,8 @@ final class SenderStats: @unchecked Sendable {
 				snapshot.displayDelay = Double(report.delayP50Micros) / 1000
 				snapshot.displayDelayP99 = Double(report.delayP99Micros) / 1000
 				snapshot.displayPresentedFPS = report.intervalMillis > 0 ? Double(report.presentedFrames) * 1000 / Double(report.intervalMillis) : 0
+				snapshot.displayDrawsPerSecond = report.intervalMillis > 0 ? Double(report.draws) * 1000 / Double(report.intervalMillis) : 0
+				snapshot.displayWait = Double(report.waitP50Micros) / 1000
 			}
 			current = SenderSnapshot()
 			coverageSum = 0
@@ -147,7 +156,12 @@ struct ReceiverSnapshot: Equatable {
 	var interval: Double = 0
 	var receivedFrames = 0
 	var presentedFrames = 0
+	/// Drawables presented; several frames that arrived together share one.
+	var draws = 0
 	var bytes = 0
+	/// Median over the most recent frames from the last byte arriving to the draw starting, in
+	/// milliseconds, held while the screen is idle.
+	var recentWait = 0.0
 	/// Last byte received → frame handed to the display, in milliseconds.
 	var presentDelayP50 = 0.0
 	var presentDelayP99 = 0.0
@@ -166,6 +180,7 @@ final class ReceiverStats: @unchecked Sendable {
 	private var current = ReceiverSnapshot()
 	private var delays: [Double] = []
 	private var recent = RecentLatencies()
+	private var recentWaits = RecentLatencies()
 	private var since = Date()
 
 	func recordReceived(bytes: Int) {
@@ -184,9 +199,25 @@ final class ReceiverStats: @unchecked Sendable {
 		}
 	}
 
+	/// Records one drawable and how long each frame in it waited to be drawn.
+	/// - Parameters:
+	///   - receivedTimes: Host times, in nanoseconds, at which each frame's last byte arrived.
+	///   - now: The host time the draw started.
+	func recordDraw(receivedTimes: [UInt64], at now: UInt64) {
+		lock.withLock {
+			current.draws += 1
+			for received in receivedTimes {
+				recentWaits.append(Double(now &- received) / 1e6)
+			}
+		}
+	}
+
 	/// Forgets the recent delays, so a new connection is not judged by the previous one.
 	func resetRecent() {
-		lock.withLock { recent.removeAll() }
+		lock.withLock {
+			recent.removeAll()
+			recentWaits.removeAll()
+		}
 	}
 
 	func drain() -> ReceiverSnapshot {
@@ -198,6 +229,7 @@ final class ReceiverStats: @unchecked Sendable {
 			snapshot.presentDelayP50 = Percentile.of(sorted, 0.5)
 			snapshot.presentDelayP99 = Percentile.of(sorted, 0.99)
 			(snapshot.recentDelay, snapshot.recentDelayP99) = recent.percentiles()
+			snapshot.recentWait = recentWaits.percentiles().p50
 			current = ReceiverSnapshot()
 			delays.removeAll(keepingCapacity: true)
 			since = now

@@ -248,13 +248,20 @@ struct DisplayReportMessage: Equatable {
 	var receivedFrames: UInt32
 	var presentedFrames: UInt32
 	var intervalMillis: UInt32
+	/// Drawables presented over `intervalMillis`. Zero from 0.1.10 and earlier, which leave the
+	/// field clear.
+	var draws: UInt32
+	/// Rolling median from the last byte of a frame arriving to its draw starting, in microseconds.
+	var waitP50Micros: UInt32
 
-	init(delayP50Micros: UInt32, delayP99Micros: UInt32, receivedFrames: UInt32, presentedFrames: UInt32, intervalMillis: UInt32) {
+	init(delayP50Micros: UInt32, delayP99Micros: UInt32, receivedFrames: UInt32, presentedFrames: UInt32, intervalMillis: UInt32, draws: UInt32 = 0, waitP50Micros: UInt32 = 0) {
 		self.delayP50Micros = delayP50Micros
 		self.delayP99Micros = delayP99Micros
 		self.receivedFrames = receivedFrames
 		self.presentedFrames = presentedFrames
 		self.intervalMillis = intervalMillis
+		self.draws = draws
+		self.waitP50Micros = waitP50Micros
 	}
 
 	init(_ snapshot: ReceiverSnapshot) {
@@ -263,7 +270,9 @@ struct DisplayReportMessage: Equatable {
 			delayP99Micros: UInt32(clamping: Int((snapshot.recentDelayP99 * 1000).rounded())),
 			receivedFrames: UInt32(clamping: snapshot.receivedFrames),
 			presentedFrames: UInt32(clamping: snapshot.presentedFrames),
-			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded()))
+			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded())),
+			draws: UInt32(clamping: snapshot.draws),
+			waitP50Micros: UInt32(clamping: Int((snapshot.recentWait * 1000).rounded()))
 		)
 	}
 
@@ -275,6 +284,8 @@ struct DisplayReportMessage: Equatable {
 		WireHeader.store(receivedFrames, p, 12)
 		WireHeader.store(presentedFrames, p, 16)
 		WireHeader.store(intervalMillis, p, 20)
+		WireHeader.store(draws, p, 24)
+		WireHeader.store(waitP50Micros, p, 28)
 	}
 
 	static func decode(_ p: UnsafeRawPointer) throws -> DisplayReportMessage {
@@ -284,7 +295,9 @@ struct DisplayReportMessage: Equatable {
 			delayP99Micros: WireHeader.load32(p, 8),
 			receivedFrames: WireHeader.load32(p, 12),
 			presentedFrames: WireHeader.load32(p, 16),
-			intervalMillis: WireHeader.load32(p, 20)
+			intervalMillis: WireHeader.load32(p, 20),
+			draws: WireHeader.load32(p, 24),
+			waitP50Micros: WireHeader.load32(p, 28)
 		)
 	}
 }
