@@ -36,17 +36,19 @@ struct WindowSnapshotTests {
 			snapshot.meanCoverage = busy ? 0.031 : 0
 			snapshot.maxCoverage = busy ? 0.2 : 0
 			let wobble = sin(Double(second) / 5) * 1.2
-			snapshot.recentLatency = second < 2 ? 0 : 8.5 + wobble * 0.5
-			snapshot.recentLatencyP99 = second < 2 ? 0 : 16 + abs(wobble)
+			// Smooth Motion with its 20 ms minimum, as measured on 2026-11-14: 18.8 ms in all,
+			// about 7 ms of it held on the display Mac.
+			snapshot.recentLatency = second < 2 ? 0 : 18.8 + wobble * 0.5
+			snapshot.recentLatencyP99 = second < 2 ? 0 : 24 + abs(wobble)
 			snapshot.latencyMax = busy ? 31 : 0
-			snapshot.displayDelay = second < 3 ? 0 : 6.5 + wobble * 0.3
-			snapshot.displayDelayP99 = second < 3 ? 0 : 12
+			snapshot.displayDelay = second < 3 ? 0 : 15.6 + wobble * 0.3
+			snapshot.displayDelayP99 = second < 3 ? 0 : 19.4
 			snapshot.displayPresentedFPS = busy ? 118 : 0
 			snapshot.displayDrawsPerSecond = busy ? 117 : 0
-			snapshot.displayWait = busy ? 0.4 : 0
-			snapshot.displayUnevenPerSecond = busy ? 1 : 0
+			snapshot.displayWait = second < 3 ? 0 : 7.0 + wobble * 0.3
+			snapshot.displayUnevenPerSecond = 0
 			snapshot.displayComparedPerSecond = busy ? 117 : 0
-			snapshot.displayPacing = busy ? 3.5 : 0
+			snapshot.displayPacing = second < 3 ? 0 : 20
 			history.append(snapshot)
 		}
 		let senderStates: [(String, SenderSession.Status, Int?, [SenderSnapshot])] = [
