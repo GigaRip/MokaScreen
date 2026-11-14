@@ -40,7 +40,8 @@ Do this once on each Mac.
 	display to the side where the other MacBook sits. macOS remembers this.
 
 From then on MokaScreen remembers each Mac's role and connects by itself when it
-opens. On the display Mac, press **Esc** to get your screen back.
+opens. On the display Mac, switching to another app pauses the picture and switching
+back to MokaScreen resumes it; press **Esc** to get your screen back.
 
 ### If one Mac is managed by your employer
 
