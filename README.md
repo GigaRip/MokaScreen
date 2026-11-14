@@ -13,15 +13,18 @@ driver, no kernel extension.
 
 ## Requirements
 
-- Two **MacBook Pro with M4 Pro, M4 Max, M5 Pro, or M5 Max**, 14-inch or 16-inch, in
-	any combination.
+- Two **MacBooks**.
 - **macOS 27.2 or later** on both.
 - A **Thunderbolt 4 or 5 cable** between them.
 
-Thunderbolt 5 is best. Over Thunderbolt 4 — a Thunderbolt 4 cable, or a MacBook Pro
-with the base M4 or M5 chip — the picture is just as sharp, but whole-screen changes
-(switching Spaces, full-screen video) need more than Thunderbolt 4 networking carries
-at 120 Hz, so those drop below 120 frames per second.
+Two MacBook Pros with Thunderbolt 5 (M4 or M5 Pro or Max) are best. Over Thunderbolt 4 —
+a Thunderbolt 4 cable, or a Mac with Thunderbolt 4 ports — the picture is just as
+sharp, but whole-screen changes (switching Spaces, full-screen video) need more than
+Thunderbolt 4 networking carries at 120 Hz, so those drop below 120 frames per second.
+
+The extended display runs at the display Mac's refresh rate: up to 120 Hz on a
+ProMotion screen, 60 Hz on a MacBook Air. MokaScreen has been tested on two 16-inch
+MacBook Pros with M5 Max.
 
 ## Setting up the two Macs
 
