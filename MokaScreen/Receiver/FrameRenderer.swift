@@ -254,25 +254,7 @@ final class FrameRenderer: FrameSink {
 			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
 		}
 		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.delay) / 1e6 : 0)
-		if !current.isEmpty, let blit = commandBuffer.makeBlitCommandEncoder() {
-			for frame in current {
-				let buffer = frame.slot.owner as! MTLBuffer
-				for rect in frame.rects {
-					blit.copy(
-						from: buffer,
-						sourceOffset: rect.offset,
-						sourceBytesPerRow: rect.width * 4,
-						sourceBytesPerImage: rect.width * 4 * rect.height,
-						sourceSize: MTLSize(width: rect.width, height: rect.height, depth: 1),
-						to: surface.texture,
-						destinationSlice: 0,
-						destinationLevel: 0,
-						destinationOrigin: MTLOrigin(x: rect.x, y: rect.y, z: 0)
-					)
-				}
-			}
-			blit.endEncoding()
-		}
+		encodeBlit(current, to: surface, in: commandBuffer)
 
 		let pass = MTLRenderPassDescriptor()
 		pass.colorAttachments[0].texture = drawable.texture
@@ -316,6 +298,57 @@ final class FrameRenderer: FrameSink {
 		}
 		commandBuffer.commit()
 		return true
+	}
+
+	/// Applies every completed frame to the display texture without presenting anything.
+	///
+	/// While the display Mac is paused, frames must still be taken off the wire: otherwise the
+	/// slots stay full, the socket stops being read, and the sender's writes block. Applying
+	/// them keeps the texture current, so resuming shows the newest image at once.
+	func absorb() {
+		lock.lock()
+		let frames = pending
+		pending.removeAll(keepingCapacity: true)
+		let surface = surface
+		lock.unlock()
+
+		let slots = frames.map(\.slot)
+		guard let surface else {
+			release(slots)
+			return
+		}
+		let current = frames.filter { surface.owns($0.slot) }
+		guard !current.isEmpty, let commandBuffer = commandQueue.makeCommandBuffer() else {
+			release(slots)
+			return
+		}
+		surface.hasContent = true
+		encodeBlit(current, to: surface, in: commandBuffer)
+		commandBuffer.addCompletedHandler { [weak self] _ in
+			self?.release(slots)
+		}
+		commandBuffer.commit()
+	}
+
+	private func encodeBlit(_ frames: [ReceivedFrame], to surface: Surface, in commandBuffer: MTLCommandBuffer) {
+		guard !frames.isEmpty, let blit = commandBuffer.makeBlitCommandEncoder() else { return }
+		for frame in frames {
+			let buffer = frame.slot.owner as! MTLBuffer
+			for rect in frame.rects {
+				blit.copy(
+					from: buffer,
+					sourceOffset: rect.offset,
+					sourceBytesPerRow: rect.width * 4,
+					sourceBytesPerImage: rect.width * 4 * rect.height,
+					sourceSize: MTLSize(width: rect.width, height: rect.height, depth: 1),
+					to: surface.texture,
+					destinationSlice: 0,
+					destinationLevel: 0,
+					destinationOrigin: MTLOrigin(x: rect.x, y: rect.y, z: 0)
+				)
+			}
+		}
+		blit.endEncoding()
 	}
 
 	// Compiled at runtime (a few milliseconds, once per connection) so building MokaScreen needs

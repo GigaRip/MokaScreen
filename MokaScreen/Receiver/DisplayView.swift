@@ -82,6 +82,7 @@ final class PresentationDriver {
 	/// Guards `stopped`, `inFlight`, and `epoch`, and signals when a drawable is presented.
 	private let condition = NSCondition()
 	private var stopped = false
+	private var paused = false
 	private var inFlight = 0
 	/// Advances when a timeout clears `inFlight`, so reports for drawables from before it are ignored.
 	private var epoch = 0
@@ -110,9 +111,26 @@ final class PresentationDriver {
 		wake.signal()
 	}
 
+	/// While paused, arriving frames are applied to the image but not presented; resuming
+	/// presents the newest image at once.
+	func setPaused(_ isPaused: Bool) {
+		condition.withLock { paused = isPaused }
+		if isPaused {
+			wake.signal()
+		} else {
+			renderer.setNeedsRedraw()
+		}
+	}
+
 	private func run() {
 		while true {
 			wake.wait()
+			let (isStopped, isPaused) = condition.withLock { (stopped, paused) }
+			if isStopped { return }
+			if isPaused {
+				renderer.absorb()
+				continue
+			}
 			guard waitForRoom() else { return }
 			guard renderer.hasWork, let drawable = layer.nextDrawable() else { continue }
 			let current = condition.withLock {

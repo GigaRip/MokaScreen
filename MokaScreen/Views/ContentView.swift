@@ -174,6 +174,7 @@ extension ReceiverSession.Status {
 		case .waitingForCable: "Waiting for a Thunderbolt connection"
 		case .listening: "Ready — waiting for the other Mac"
 		case .showing(let peer): "Showing \(peer)"
+		case .paused(let peer): "Paused — switch to MokaScreen to show \(peer)"
 		case .failed(let message): message
 		}
 	}

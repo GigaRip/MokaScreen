@@ -22,6 +22,8 @@ final class ReceiverSession {
 		case waitingForCable
 		case listening
 		case showing(peer: String)
+		/// Connected, but another app on this Mac is active, so the picture is hidden.
+		case paused(peer: String)
 		case failed(String)
 	}
 
@@ -64,10 +66,13 @@ final class ReceiverSession {
 	private final class Connection {
 		let receiver: FrameReceiver
 		let renderer: FrameRenderer
+		var peer = ""
 		var window: NSWindow?
+		var view: MetalLayerView?
 		var driver: PresentationDriver?
 		var refreshRate: RefreshRateRequest?
 		var activity: NSObjectProtocol?
+		var activationObservers: [NSObjectProtocol] = []
 
 		init(receiver: FrameReceiver, renderer: FrameRenderer) {
 			self.receiver = receiver
@@ -228,8 +233,6 @@ final class ReceiverSession {
 			fullScreen.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
 			fullScreen.setFrame(screen.frame, display: false)
 			window = fullScreen
-			NSApp.presentationOptions = [.hideDock, .hideMenuBar]
-			NSCursor.hide()
 		case .window:
 			window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Int(hello.width) / 4, height: Int(hello.height) / 4), styleMask: [.titled, .resizable, .closable, .miniaturizable], backing: .buffered, defer: false)
 			window.title = "MokaScreen Loopback"
@@ -241,37 +244,105 @@ final class ReceiverSession {
 		// Nothing is drawn above the Metal layer, so WindowServer can show it directly instead of
 		// compositing the window, which would add a refresh of latency.
 		window.contentView = view
+
+		let driver = PresentationDriver(layer: view.metalLayer, renderer: connection.renderer)
+		connection.peer = peer
+		connection.window = window
+		connection.view = view
+		connection.driver = driver
+
+		switch presentation {
+		case .fullScreen:
+			// The hidden menu bar and Dock apply only while MokaScreen is the active app; with
+			// another app active, its menu bar and windows would be drawn over the picture. So the
+			// picture is shown only while MokaScreen is active and paused otherwise.
+			driver.setPaused(true)
+			driver.start()
+			status = .paused(peer: peer)
+			let center = NotificationCenter.default
+			connection.activationObservers = [
+				center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+					MainActor.assumeIsolated { self?.pause() }
+				},
+				center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+					MainActor.assumeIsolated { self?.resume() }
+				},
+			]
+			// A connection can arrive while another app is active, e.g. a reconnect after sleep.
+			// macOS may decline the activation; the picture then appears when the user switches
+			// back to MokaScreen.
+			if NSApp.isActive {
+				resume()
+			} else {
+				NSApp.activate()
+			}
+		case .window:
+			driver.start()
+			beginShowing(connection)
+		}
+	}
+
+	/// Hides the picture while another app is active. Frames keep arriving and are applied, so
+	/// the sender is not held up and resuming shows the newest image.
+	private func pause() {
+		guard let connection, case .showing(let peer) = status else { return }
+		endShowing(connection)
+		status = .paused(peer: peer)
+		Log.transport.info("Paused: another app is active")
+	}
+
+	private func resume() {
+		guard let connection, case .paused = status else { return }
+		beginShowing(connection)
+		Log.transport.info("Resumed")
+	}
+
+	private func beginShowing(_ connection: Connection) {
+		guard let window = connection.window, let view = connection.view else { return }
+		if presentation == .fullScreen {
+			NSApp.presentationOptions = [.hideDock, .hideMenuBar]
+			NSCursor.hide()
+		}
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
-
 		connection.renderer.refreshInterval = 1 / Double(max(60, window.screen?.maximumFramesPerSecond ?? 120))
-		let driver = PresentationDriver(layer: view.metalLayer, renderer: connection.renderer)
-		driver.start()
-		connection.window = window
-		connection.driver = driver
 		connection.refreshRate = RefreshRateRequest(view: view)
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
-		status = .showing(peer: peer)
+		connection.driver?.setPaused(false)
+		status = .showing(peer: connection.peer)
+	}
+
+	private func endShowing(_ connection: Connection) {
+		connection.driver?.setPaused(true)
+		connection.refreshRate?.invalidate()
+		connection.refreshRate = nil
+		if let activity = connection.activity {
+			ProcessInfo.processInfo.endActivity(activity)
+		}
+		connection.activity = nil
+		connection.window?.orderOut(nil)
+		if presentation == .fullScreen {
+			NSApp.presentationOptions = []
+			NSCursor.unhide()
+		}
 	}
 
 	private func disconnect() {
 		guard let connection else { return }
 		self.connection = nil
+		for observer in connection.activationObservers {
+			NotificationCenter.default.removeObserver(observer)
+		}
+		connection.activationObservers = []
+		if case .showing = status {
+			endShowing(connection)
+		} else {
+			connection.window?.orderOut(nil)
+		}
 		connection.receiver.stop()
 		connection.renderer.shutDown()
 		connection.driver?.stop()
-		connection.refreshRate?.invalidate()
-		if let activity = connection.activity {
-			ProcessInfo.processInfo.endActivity(activity)
-		}
-		if let window = connection.window {
-			window.orderOut(nil)
-			if presentation == .fullScreen {
-				NSApp.presentationOptions = []
-				NSCursor.unhide()
-			}
-		}
 		if status != .stopped {
 			status = listener != nil ? .listening : .waitingForCable
 		}

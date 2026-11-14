@@ -31,7 +31,7 @@ struct ReceiverView: View {
 				}
 			}
 
-			Text("When the other Mac connects, this screen switches to its display. Press Esc to stop showing it.")
+			Text("When the other Mac connects, this screen switches to its display. Switch to another app to pause it, or press Esc to stop.")
 				.font(.callout)
 				.foregroundStyle(.secondary)
 				.fixedSize(horizontal: false, vertical: true)
