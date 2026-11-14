@@ -326,7 +326,7 @@ final class ReceiverSession {
 		status = .showing(peer: connection.peer)
 	}
 
-	/// Holds or releases the display at 120 Hz while showing, as Develop › Fixed 120 Hz changes.
+	/// Holds or releases the display at 120 Hz while showing, as Settings › Hold the display at 120 Hz changes.
 	private func updateRefreshRateRequest(fixed: Bool) {
 		guard let connection, case .showing = status, let view = connection.view else { return }
 		if fixed, connection.refreshRate == nil {

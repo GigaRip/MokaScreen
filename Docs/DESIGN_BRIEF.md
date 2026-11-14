@@ -33,15 +33,15 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 
 **Receiver (the display Mac)**
 - Full-screen borderless window with a `CAMetalLayer`, shown directly (no WindowServer compositing). The reader receives straight into eight GPU-shared slot buffers; each draw blits the frames it applies into a private display texture and draws that to the drawable.
-- **Smooth Motion** (on by default): each frame is scheduled for its capture time plus the quickest recent trip plus a delay — the 99th-percentile lateness over the last second, at least 20 ms by default (Develop › Smooth Motion Minimum Delay: Adaptive, 10, 20, 25 or 30 ms), at most 30 ms — moved to the panel's next refresh. A frame waits in its slot until a refresh before that time, so frames reach the glass spaced as they were captured. Without Smooth Motion, frames are presented on arrival.
-- **Refresh rate:** a display link pinned at 120 Hz (`RefreshRateRequest`, Develop › Fixed 120 Hz) holds the panel at 120 Hz while showing; its ticks give the refresh phase that Smooth Motion snaps to.
+- **Smooth Motion** (on by default): each frame is scheduled for its capture time plus the quickest recent trip plus a delay — the 99th-percentile lateness over the last second, at least 20 ms by default (Settings › Smoothness margin: Adaptive, 10, 20, 25 or 30 ms), at most 30 ms — moved to the panel's next refresh. A frame waits in its slot until a refresh before that time, so frames reach the glass spaced as they were captured. Without Smooth Motion, frames are presented on arrival.
+- **Refresh rate:** a display link pinned at 120 Hz (`RefreshRateRequest`, Settings › Hold the display at 120 Hz) holds the panel at 120 Hz while showing; its ticks give the refresh phase that Smooth Motion snaps to.
 - **In flight:** up to two drawables (three under Smooth Motion). Each stops counting when macOS reports it on the glass, or one refresh after its scheduled time (two after the draw, if presented at once) when no report comes.
 - **Keep-alive:** after 250 ms with no new frame, and every 250 ms while still, the unchanged picture is presented again, left out of the statistics.
 - Switching to another app on the display Mac pauses the picture: frames are still received and applied to the texture, but not presented. Esc stops.
 
 **Transport**
 - Single TCP connection over Thunderbolt Bridge (`bridge0`), Nagle off, large socket buffers, behind `ByteStream` so the wire layer can change later.
-- Fixed 32-byte message headers. Besides frames: `presented` acknowledgements carry each frame's glass time so the sender can time capture → glass without a shared clock; `settings` keeps the Develop settings the same on both Macs; once-a-second display and pace reports; and, for Develop › Record Frame Timing, a timing request answered by one `frameTiming` report per frame.
+- Fixed 32-byte message headers. Besides frames: `presented` acknowledgements carry each frame's glass time so the sender can time capture → glass without a shared clock; `settings` keeps the display and statistics settings the same on both Macs; once-a-second display and pace reports; and, for Develop › Record Frame Timing, a timing request answered by one `frameTiming` report per frame.
 
 ## Findings that shaped the design
 
@@ -54,7 +54,8 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 
 ## Measuring
 
-- Develop › Show Statistics: rates, coverage, and capture → glass latency split into capture + cable, Smooth Motion's hold, and the display Mac's own share.
+- Settings › Developer mode adds the Develop menu with the tools below; the user-facing settings (Smooth Motion, smoothness margin, 120 Hz, statistics) are in Settings.
+- Settings › Show statistics: rates, coverage, and capture → glass latency split into capture + cable, Smooth Motion's hold, and the display Mac's own share.
 - Develop › Record Frame Timing (⌥⌘T): 10 s of per-frame capture, send, arrival, draw, scheduled and glass times from both Macs, one CSV row per capture, in `~/Library/Logs/MokaScreen/`. Compare each pair of consecutive shown frames' glass spacing with their capture spacing; a difference over half a refresh is an uneven pair.
 - Develop › Show Latency Clock: a millisecond clock on every screen, for filming glass-to-glass latency.
 

@@ -66,6 +66,21 @@ struct WindowSnapshotTests {
 			try render(ReceiverView(session: model.receiver), model: model, defaults: defaults, to: directory.appending(path: "receiver\(suffix).png"))
 		}
 		model.sender.applySnapshotState(status: .stopped)
+		defaults.removeObject(forKey: StatisticsPreference.key)
+		try renderSettings(defaults: defaults, to: directory.appending(path: "settings.png"))
+	}
+
+	/// Renders the Settings window's content at its own width and natural height.
+	private func renderSettings(defaults: UserDefaults, to url: URL) throws {
+		let host = NSHostingView(rootView: SettingsView().defaultAppStorage(defaults))
+		let size = host.fittingSize
+		host.frame = NSRect(origin: .zero, size: size)
+		let window = NSWindow(contentRect: host.frame, styleMask: [.titled], backing: .buffered, defer: false)
+		window.contentView = host
+		host.layoutSubtreeIfNeeded()
+		let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+		host.cacheDisplay(in: host.bounds, to: rep)
+		try #require(rep.representation(using: .png, properties: [:])).write(to: url)
 	}
 
 	/// Renders `view` the way ``ContentView`` lays it out: fixed width, natural height.

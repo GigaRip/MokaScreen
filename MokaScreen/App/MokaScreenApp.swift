@@ -14,10 +14,7 @@ import SwiftUI
 @main
 struct MokaScreenApp: App {
 	@State private var model = AppModel()
-	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
-	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = SmoothMotionPreference.defaultValue
-	@AppStorage(SmoothMotionFloorPreference.key) private var smoothMotionFloor = SmoothMotionFloorPreference.defaultValue
-	@AppStorage(FixedRefreshRatePreference.key) private var fixedRefreshRate = FixedRefreshRatePreference.defaultValue
+	@AppStorage(DeveloperModePreference.key) private var developerMode = false
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
 	/// running; `startingUpdater: true` begins checking for updates at launch.
@@ -41,35 +38,39 @@ struct MokaScreenApp: App {
 			CommandGroup(after: .appInfo) {
 				CheckForUpdatesView(updater: updaterController.updater)
 			}
-			CommandMenu("Develop") {
-				Button("Start Loopback Test") { model.startLoopback() }
-					.disabled(model.isLoopback)
-				Toggle("Show Statistics", isOn: $showsStatistics)
-					.keyboardShortcut("s", modifiers: [.command, .option])
-				Toggle("Smooth Motion", isOn: $smoothMotion)
-					.keyboardShortcut("m", modifiers: [.command, .option])
-				Picker("Smooth Motion Minimum Delay", selection: $smoothMotionFloor) {
-					ForEach(SmoothMotionFloorPreference.choices, id: \.self) { millis in
-						Text(millis == 0 ? "Adaptive" : "\(millis) ms").tag(millis)
-					}
-				}
-				.disabled(!smoothMotion)
-				Toggle("Fixed 120 Hz", isOn: $fixedRefreshRate)
-					.keyboardShortcut("r", modifiers: [.command, .option])
-				Button("Show Latency Clock") { LatencyClock.toggle() }
-					.keyboardShortcut("l", modifiers: [.command, .option])
-				Button(model.sender.isRecordingTiming ? "Recording Frame Timing…" : "Record Frame Timing") { model.sender.recordFrameTiming() }
-					.keyboardShortcut("t", modifiers: [.command, .option])
-					.disabled(!model.sender.canRecordTiming)
-				Divider()
-				Button("Open Statistics Folder") {
-					let url = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/MokaScreen")
-					try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-					NSWorkspace.shared.open(url)
-				}
+			if developerMode {
+				developMenu
+			}
+		}
+		Settings {
+			SettingsView()
+		}
+	}
+
+	/// Measuring tools, shown only with Settings › Developer mode on.
+	private var developMenu: some Commands {
+		CommandMenu("Develop") {
+			Button("Start Loopback Test") { model.startLoopback() }
+				.disabled(model.isLoopback)
+			Divider()
+			Button("Show Latency Clock") { LatencyClock.toggle() }
+				.keyboardShortcut("l", modifiers: [.command, .option])
+			Button(model.sender.isRecordingTiming ? "Recording Frame Timing…" : "Record Frame Timing") { model.sender.recordFrameTiming() }
+				.keyboardShortcut("t", modifiers: [.command, .option])
+				.disabled(!model.sender.canRecordTiming)
+			Divider()
+			Button("Open Statistics Folder") {
+				let url = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/MokaScreen")
+				try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+				NSWorkspace.shared.open(url)
 			}
 		}
 	}
+}
+
+/// Whether the Develop menu is shown (Settings › Developer mode). This Mac's only; not shared.
+enum DeveloperModePreference {
+	static let key = "developerMode"
 }
 
 /// Whether the windows show detailed statistics. Kept in user defaults, so once turned on it

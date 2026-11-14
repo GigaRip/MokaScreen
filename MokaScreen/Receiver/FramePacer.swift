@@ -43,7 +43,7 @@ struct FramePacer {
 	/// A scroll changes most of the screen in every frame, about 26 MB, and the trip of such frames
 	/// varied by up to 15 ms with the cable's throughput in a frame timing recording on
 	/// 2026-11-14; capped at one refresh, a third of them reached the glass a refresh early or
-	/// late. 30 ms leaves room above the largest Develop › Smooth Motion Minimum Delay choice.
+	/// late. 30 ms leaves room above the largest Settings › Smoothness margin choice.
 	static let maximumDelayNanos: Int64 = 30_000_000
 
 	private var received: [UInt64] = []
@@ -59,8 +59,8 @@ struct FramePacer {
 	private(set) var minimumTransit: Int64 = .max
 	/// Nanoseconds added beyond the quickest trip, following how late recent frames were.
 	private(set) var delay: Int64 = maximumDelayNanos
-	/// The least delay to schedule with, whatever recent frames needed (Develop › Smooth Motion
-	/// Minimum Delay). Zero leaves the delay adaptive.
+	/// The least delay to schedule with, whatever recent frames needed (Settings › Smoothness
+	/// margin). Zero leaves the delay adaptive.
 	var floorNanos: Int64 = 0
 
 	/// The delay frames are scheduled with: ``delay``, raised to ``floorNanos``.

@@ -133,9 +133,16 @@ bookkeeping of drawables in flight.
 **Develop › Start Loopback Test** (or launch with `--loopback-test`) runs both
 sides in one process over loopback, with the received display in a window.
 
+### Settings and the Develop menu
+
+**MokaScreen › Settings** (⌘,) holds Smooth Motion, its smoothness margin, holding
+the display at 120 Hz, and Show statistics; these are kept the same on both Macs.
+Its **Developer mode** checkbox, for this Mac only, adds the **Develop** menu with
+the measuring tools below.
+
 ### Measuring
 
-- **Statistics.** **Develop › Show Statistics** (⌥⌘S) shows, on the Mac you work
+- **Statistics.** **Settings › Show statistics** shows, on the Mac you work
 	on, capture/send rates, the share of the screen sent per frame, and capture →
 	on-glass latency, measured from the display Mac's presentation callback and
 	split into capture + cable, Smooth Motion's hold, and the display Mac's own
@@ -146,14 +153,14 @@ sides in one process over loopback, with the received display in a window.
 	millisecond clock on every screen, including the extended one.
 	Film both MacBooks with a high-speed camera and subtract the readings in one
 	video frame.
-- **Smooth Motion.** On by default; **Develop › Smooth Motion** (⌥⌘M), on either
-	Mac and kept the same on both, turns it off. The display Mac presents each frame
+- **Smooth Motion.** On by default; **Settings › Smooth Motion**, on either Mac
+	and kept the same on both, turns it off. The display Mac presents each frame
 	at its capture time plus a fixed delay, on one of its own refreshes, instead of
 	as soon as it arrives, so frames reach the glass spaced as they were captured
 	even though large frames, such as a scroll's, take uneven times on the cable.
 	The delay follows the 99th-percentile spread of frame trips over the last
-	second, up to 30 ms. **Develop › Smooth Motion Minimum Delay** sets a floor under
-	it (20 ms by default; also Adaptive, 10, 25 or 30 ms), which also covers the
+	second, up to 30 ms. **Settings › Smoothness margin** sets a floor under it
+	(20 ms by default; also Adaptive, 10, 25 or 30 ms), which also covers the
 	first frames of a scroll, before the adaptive delay has risen. *Uneven frames*
 	in the statistics counts frames whose spacing on the glass differed from their
 	capture spacing by more than half a refresh.
@@ -161,7 +168,7 @@ sides in one process over loopback, with the received display in a window.
 	on while connected, records 10 seconds of every frame's capture, send,
 	arrival, draw, scheduled, and glass times on both Macs, and writes one CSV row
 	per capture to `~/Library/Logs/MokaScreen/`.
-- **Fixed 120 Hz.** **Develop › Fixed 120 Hz** (⌥⌘R), on by default, holds the
+- **120 Hz.** **Settings › Hold the display at 120 Hz**, on by default, holds the
 	display Mac's panel at 120 Hz while showing; turned off, ProMotion chooses the
 	rate. Smooth Motion lines frames up with the panel's refreshes only while it
 	is on.
