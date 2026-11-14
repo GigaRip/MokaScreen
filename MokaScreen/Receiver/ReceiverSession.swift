@@ -216,7 +216,7 @@ final class ReceiverSession {
 			}
 		})
 		connection = Connection(receiver: receiver, renderer: renderer)
-		renderer.smoothMotion = SmoothMotionPreference.isOn
+		renderer.smoothMotion = SmoothMotionPreference.isOn(in: .standard)
 		renderer.smoothMotionFloorMillis = SmoothMotionFloorPreference.millis(in: .standard)
 		renderer.onPresented = { [weak receiver] frameID, glassTime in
 			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)

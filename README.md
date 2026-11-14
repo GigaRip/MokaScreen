@@ -130,13 +130,21 @@ sides in one process over loopback, with the received display in a window.
 	millisecond clock on every screen, including the extended one.
 	Film both MacBooks with a high-speed camera and subtract the readings in one
 	video frame.
-- **Smooth Motion.** **Develop › Smooth Motion** (⌥⌘M), on either Mac and kept
-	the same on both, makes the display Mac present each frame at its capture time
-	plus a fixed delay, instead of as soon as it arrives, so frames reach the glass
-	spaced as they were captured. The delay follows the 99th-percentile spread of
-	frame trips, at most one refresh. *Uneven frames* in the statistics counts
-	frames whose spacing on the glass differed from their capture spacing by more
-	than half a refresh.
+- **Smooth Motion.** On by default; **Develop › Smooth Motion** (⌥⌘M), on either
+	Mac and kept the same on both, turns it off. The display Mac presents each frame
+	at its capture time plus a fixed delay, on one of its own refreshes, instead of
+	as soon as it arrives, so frames reach the glass spaced as they were captured
+	even though large frames, such as a scroll's, take uneven times on the cable.
+	The delay follows the 99th-percentile spread of frame trips over the last
+	second, up to three refreshes. **Develop › Smooth Motion Minimum Delay** sets a
+	floor under it (20 ms by default; Adaptive for none), which also covers the
+	first frames of a scroll, before the adaptive delay has risen. *Uneven frames*
+	in the statistics counts frames whose spacing on the glass differed from their
+	capture spacing by more than half a refresh.
+- **Frame timing.** **Develop › Record Frame Timing** (⌥⌘T), on the Mac you work
+	on while connected, records 10 seconds of every frame's capture, send,
+	arrival, draw, and glass times on both Macs, and writes one CSV row per capture
+	to `~/Library/Logs/MokaScreen/`.
 - **Dirty-rectangle audit.** `defaults write com.gigarip.mokascreen AuditDirtyRects -bool YES`
 	makes the sender diff every captured frame against the previous one and log
 	any changed tile ScreenCaptureKit did not report.

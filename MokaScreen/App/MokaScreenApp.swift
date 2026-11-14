@@ -15,8 +15,8 @@ import SwiftUI
 struct MokaScreenApp: App {
 	@State private var model = AppModel()
 	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
-	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = false
-	@AppStorage(SmoothMotionFloorPreference.key) private var smoothMotionFloor = 0
+	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = SmoothMotionPreference.defaultValue
+	@AppStorage(SmoothMotionFloorPreference.key) private var smoothMotionFloor = SmoothMotionFloorPreference.defaultValue
 	@AppStorage(FixedRefreshRatePreference.key) private var fixedRefreshRate = FixedRefreshRatePreference.defaultValue
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
@@ -83,14 +83,15 @@ enum StatisticsPreference {
 	}
 }
 
-/// Whether the display Mac paces frames to their capture times. Kept in user defaults like
-/// ``StatisticsPreference``.
+/// Whether the display Mac paces frames to their capture times. On by default since 0.1.22:
+/// with a 20 ms minimum delay it put all but 1 of 775 frame pairs of a Finder scroll on the glass
+/// spaced as captured, against 216 of 707 uneven when drawn on arrival.
 enum SmoothMotionPreference {
 	static let key = "smoothMotion"
+	static let defaultValue = true
 
-	static var isOn: Bool {
-		get { UserDefaults.standard.bool(forKey: key) }
-		set { UserDefaults.standard.set(newValue, forKey: key) }
+	static func isOn(in defaults: UserDefaults) -> Bool {
+		defaults.object(forKey: key) as? Bool ?? defaultValue
 	}
 }
 
@@ -101,10 +102,11 @@ enum SmoothMotionPreference {
 enum SmoothMotionFloorPreference {
 	static let key = "smoothMotionFloorMillis"
 	static let choices = [0, 10, 20]
+	static let defaultValue = 20
 
 	static func millis(in defaults: UserDefaults) -> Int {
-		let value = defaults.integer(forKey: key)
-		return choices.contains(value) ? value : 0
+		guard let value = defaults.object(forKey: key) as? Int, choices.contains(value) else { return defaultValue }
+		return value
 	}
 }
 
@@ -123,10 +125,10 @@ enum FixedRefreshRatePreference {
 /// The settings both Macs keep the same while connected.
 struct SharedSettings: Equatable {
 	var showsStatistics: Bool
-	var smoothMotion: Bool
+	var smoothMotion: Bool = SmoothMotionPreference.defaultValue
 	var fixedRefreshRate: Bool = FixedRefreshRatePreference.defaultValue
 	/// See ``SmoothMotionFloorPreference``.
-	var smoothMotionFloorMillis: Int = 0
+	var smoothMotionFloorMillis: Int = SmoothMotionFloorPreference.defaultValue
 
 	/// This Mac's settings, from the standard user defaults.
 	static var current: SharedSettings {
@@ -137,7 +139,7 @@ struct SharedSettings: Equatable {
 	static func load(from defaults: UserDefaults) -> SharedSettings {
 		SharedSettings(
 			showsStatistics: defaults.bool(forKey: StatisticsPreference.key),
-			smoothMotion: defaults.bool(forKey: SmoothMotionPreference.key),
+			smoothMotion: SmoothMotionPreference.isOn(in: defaults),
 			fixedRefreshRate: FixedRefreshRatePreference.isOn(in: defaults),
 			smoothMotionFloorMillis: SmoothMotionFloorPreference.millis(in: defaults)
 		)
