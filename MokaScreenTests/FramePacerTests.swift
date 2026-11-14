@@ -39,7 +39,7 @@ struct FramePacerTests {
 		#expect(pacer.delay == 3_500_000)
 	}
 
-	@Test func delayNeverExceedsThreeRefreshes() {
+	@Test func delayNeverExceedsThirtyMilliseconds() {
 		var pacer = FramePacer()
 		for n in 0..<240 {
 			let capture = UInt64(n) * Self.refresh
@@ -47,7 +47,7 @@ struct FramePacerTests {
 			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + trip)
 		}
 		#expect(pacer.delay == FramePacer.maximumDelayNanos)
-		#expect(FramePacer.maximumDelayNanos == 25_000_000)
+		#expect(FramePacer.maximumDelayNanos == 30_000_000)
 	}
 
 	@Test func delayHoldsThroughTheNextSecondThenFalls() {

@@ -40,11 +40,11 @@ struct FramePacer {
 	/// Added to the 99th-percentile lateness, for the draw and the hand-off to macOS.
 	static let guardNanos: Int64 = 500_000
 	static let minimumDelayNanos: Int64 = 500_000
-	/// Three refreshes at 120 Hz. A scroll changes most of the screen in every frame, about 26 MB,
-	/// and the trip of such frames varied by up to 15 ms with the cable's throughput in a frame
-	/// timing recording on 2026-11-14; capped at one refresh, a third of them reached the glass a
-	/// refresh early or late.
-	static let maximumDelayNanos: Int64 = 25_000_000
+	/// A scroll changes most of the screen in every frame, about 26 MB, and the trip of such frames
+	/// varied by up to 15 ms with the cable's throughput in a frame timing recording on
+	/// 2026-11-14; capped at one refresh, a third of them reached the glass a refresh early or
+	/// late. 30 ms leaves room above the largest Develop › Smooth Motion Minimum Delay choice.
+	static let maximumDelayNanos: Int64 = 30_000_000
 
 	private var received: [UInt64] = []
 	private var transits: [Int64] = []

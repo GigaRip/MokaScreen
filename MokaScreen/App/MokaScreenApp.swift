@@ -98,10 +98,11 @@ enum SmoothMotionPreference {
 /// The least Smooth Motion holds a frame beyond the quickest recent trip, in milliseconds; 0
 /// leaves the delay to follow how late recent frames were. The first frames of a scroll are the
 /// largest and arrived 11–20 ms later than the quickest frames in frame timing recordings on
-/// 2026-11-14, before the adaptive delay had risen to cover them.
+/// 2026-11-14, before the adaptive delay had risen to cover them. 25 and 30 ms leave more room
+/// above the latest frames, for comparing by eye.
 enum SmoothMotionFloorPreference {
 	static let key = "smoothMotionFloorMillis"
-	static let choices = [0, 10, 20]
+	static let choices = [0, 10, 20, 25, 30]
 	static let defaultValue = 20
 
 	static func millis(in defaults: UserDefaults) -> Int {

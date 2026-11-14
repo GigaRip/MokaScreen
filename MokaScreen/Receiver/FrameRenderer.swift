@@ -33,8 +33,10 @@ enum RendererError: Error, CustomStringConvertible {
 final class FrameRenderer: FrameSink {
 	/// Slots in the receive ring: one being filled, one being blitted, and the rest for frames
 	/// waiting to be drawn. Smooth Motion holds a frame here until a refresh before its glass
-	/// time, up to ``FramePacer/maximumDelayNanos`` (three refreshes) after it arrives.
-	static let slotCount = 6
+	/// time, up to ``FramePacer/maximumDelayNanos`` (30 ms) after it arrives: about four frames
+	/// at 120 Hz. When every slot is full the reader stops reading and the sender drops frames,
+	/// so two are spare. Each slot holds a full frame, about 31 MB.
+	static let slotCount = 8
 
 	let device: MTLDevice
 	private let commandQueue: MTLCommandQueue
@@ -250,7 +252,7 @@ final class FrameRenderer: FrameSink {
 	/// Without Smooth Motion every frame is due on arrival. With it, a frame is due one refresh
 	/// before its paced glass time, so it waits in its receive slot rather than in a drawable:
 	/// macOS gives a layer at most three drawables, fewer than the frames that can be waiting
-	/// under a delay of three refreshes.
+	/// under a delay of up to 30 ms.
 	func nextDrawTime() -> UInt64? {
 		lock.lock()
 		defer { lock.unlock() }

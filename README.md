@@ -86,7 +86,7 @@ CGVirtualDisplay (HiDPI, 120 Hz)
   └─ ScreenCaptureKit, 120 fps, BGRA, dirty rects
        └─ DirtyRegion (tile grid, latest-frame-wins)
             └─ one TCP connection over bridge0 ─────────► recv straight into
-               (Nagle off, writev from the                GPU-shared buffers (6)
+               (Nagle off, writev from the                GPU-shared buffers (8)
                 capture buffer, no copy)                    └─ held until due (Smooth Motion)
                                                                  └─ blit into display texture
                                                                       └─ present on a refresh, 120 Hz
@@ -152,8 +152,8 @@ sides in one process over loopback, with the received display in a window.
 	as soon as it arrives, so frames reach the glass spaced as they were captured
 	even though large frames, such as a scroll's, take uneven times on the cable.
 	The delay follows the 99th-percentile spread of frame trips over the last
-	second, up to three refreshes. **Develop › Smooth Motion Minimum Delay** sets a
-	floor under it (20 ms by default; Adaptive for none), which also covers the
+	second, up to 30 ms. **Develop › Smooth Motion Minimum Delay** sets a floor under
+	it (20 ms by default; also Adaptive, 10, 25 or 30 ms), which also covers the
 	first frames of a scroll, before the adaptive delay has risen. *Uneven frames*
 	in the statistics counts frames whose spacing on the glass differed from their
 	capture spacing by more than half a refresh.
