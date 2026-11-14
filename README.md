@@ -46,6 +46,10 @@ From then on MokaScreen remembers each Mac's role and connects by itself when it
 opens. On the display Mac, switching to another app pauses the picture and switching
 back to MokaScreen resumes it; press **Esc** to get your screen back.
 
+Smooth Motion, how much margin it keeps, holding the display at 120 Hz, and
+statistics are in **MokaScreen › Settings** (⌘,), and stay the same on both Macs.
+Smooth Motion is on by default.
+
 ### If one Mac is managed by your employer
 
 MokaScreen is an ordinary app: no kernel extension, no system extension, no
@@ -128,17 +132,17 @@ sender → TCP → receiver round trip that checks every pixel, Smooth Motion's
 pacing, keeping settings the same on both Macs, frame timing recordings, and the
 bookkeeping of drawables in flight.
 
-### Trying it on one Mac
-
-**Develop › Start Loopback Test** (or launch with `--loopback-test`) runs both
-sides in one process over loopback, with the received display in a window.
-
 ### Settings and the Develop menu
 
 **MokaScreen › Settings** (⌘,) holds Smooth Motion, its smoothness margin, holding
 the display at 120 Hz, and Show statistics; these are kept the same on both Macs.
 Its **Developer mode** checkbox, for this Mac only, adds the **Develop** menu with
-the measuring tools below.
+the loopback test and the measuring tools below. Without it the menu is hidden.
+
+### Trying it on one Mac
+
+**Develop › Start Loopback Test** (or launch with `--loopback-test`) runs both
+sides in one process over loopback, with the received display in a window.
 
 ### Measuring
 
