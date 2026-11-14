@@ -19,9 +19,9 @@ struct WireTests {
 		return try decode(buffer)
 	}
 
-	@Test(arguments: [(false, false), (true, false), (false, true), (true, true)])
-	func settingsRoundTrip(flags: (Bool, Bool)) throws {
-		let message = SettingsMessage(settings: SharedSettings(showsStatistics: flags.0, smoothMotion: flags.1))
+	@Test(arguments: [(false, false, false), (true, false, false), (false, true, false), (false, false, true), (true, true, true)])
+	func settingsRoundTrip(flags: (Bool, Bool, Bool)) throws {
+		let message = SettingsMessage(settings: SharedSettings(showsStatistics: flags.0, smoothMotion: flags.1, fixedRefreshRate: flags.2))
 		#expect(try roundTrip(message.encode, SettingsMessage.decode) == message)
 	}
 

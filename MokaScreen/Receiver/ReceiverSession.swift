@@ -59,6 +59,7 @@ final class ReceiverSession {
 			self?.connection?.receiver.sendSettings(settings)
 		}, onChange: { [weak self] settings in
 			self?.connection?.renderer.smoothMotion = settings.smoothMotion
+			self?.updateRefreshRateRequest(fixed: settings.fixedRefreshRate)
 		})
 	}
 
@@ -306,11 +307,25 @@ final class ReceiverSession {
 		window.makeKeyAndOrderFront(nil)
 		NSApp.activate()
 		connection.renderer.refreshInterval = 1 / Double(max(60, window.screen?.maximumFramesPerSecond ?? 120))
-		connection.refreshRate = RefreshRateRequest(view: view)
+		if FixedRefreshRatePreference.isOn(in: .standard) {
+			connection.refreshRate = RefreshRateRequest(view: view)
+		}
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
 		connection.driver?.setPaused(false)
 		status = .showing(peer: connection.peer)
+	}
+
+	/// Holds or releases the display at 120 Hz while showing, as Develop › Fixed 120 Hz changes.
+	private func updateRefreshRateRequest(fixed: Bool) {
+		guard let connection, case .showing = status, let view = connection.view else { return }
+		if fixed, connection.refreshRate == nil {
+			connection.refreshRate = RefreshRateRequest(view: view)
+		} else if !fixed, let request = connection.refreshRate {
+			request.invalidate()
+			connection.refreshRate = nil
+		}
+		Log.render.info("Fixed 120 Hz \(fixed ? "on" : "off", privacy: .public)")
 	}
 
 	private func endShowing(_ connection: Connection) {

@@ -60,4 +60,15 @@ struct SettingsSyncTests {
 		#expect(pair.extendingSent.isEmpty)
 		#expect(pair.displaySent == [smooth])
 	}
+
+	@Test func fixedRefreshRateIsOnUntilTurnedOffAndTravels() throws {
+		let pair = try Pair()
+		#expect(SharedSettings.load(from: pair.display).fixedRefreshRate)
+		pair.extending.set(false, forKey: FixedRefreshRatePreference.key)
+
+		let variable = SharedSettings(showsStatistics: false, smoothMotion: false, fixedRefreshRate: false)
+		#expect(SharedSettings.load(from: pair.display) == variable)
+		#expect(pair.displaySent.isEmpty)
+		#expect(pair.displayChanges.last == variable)
+	}
 }

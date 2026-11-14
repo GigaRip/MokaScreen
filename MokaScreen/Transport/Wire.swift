@@ -230,20 +230,20 @@ struct PresentedMessage: Equatable {
 }
 
 /// Either direction: the settings both Macs share, so changing one on either Mac changes both.
-/// Flags at offset 4: bit 0 Show Statistics, bit 1 Smooth Motion.
+/// Flags at offset 4: bit 0 Show Statistics, bit 1 Smooth Motion, bit 2 Fixed 120 Hz.
 struct SettingsMessage: Equatable {
 	var settings: SharedSettings
 
 	func encode(into p: UnsafeMutableRawPointer) {
 		WireHeader.clear(p)
 		WireHeader.store(MessageType.settings.rawValue, p, 0)
-		WireHeader.store(UInt32(settings.showsStatistics ? 1 : 0) | UInt32(settings.smoothMotion ? 2 : 0), p, 4)
+		WireHeader.store(UInt32(settings.showsStatistics ? 1 : 0) | UInt32(settings.smoothMotion ? 2 : 0) | UInt32(settings.fixedRefreshRate ? 4 : 0), p, 4)
 	}
 
 	static func decode(_ p: UnsafeRawPointer) throws -> SettingsMessage {
 		try WireHeader.expect(.settings, p)
 		let flags = WireHeader.load32(p, 4)
-		return SettingsMessage(settings: SharedSettings(showsStatistics: flags & 1 != 0, smoothMotion: flags & 2 != 0))
+		return SettingsMessage(settings: SharedSettings(showsStatistics: flags & 1 != 0, smoothMotion: flags & 2 != 0, fixedRefreshRate: flags & 4 != 0))
 	}
 }
 

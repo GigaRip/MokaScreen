@@ -16,6 +16,7 @@ struct MokaScreenApp: App {
 	@State private var model = AppModel()
 	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
 	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = false
+	@AppStorage(FixedRefreshRatePreference.key) private var fixedRefreshRate = FixedRefreshRatePreference.defaultValue
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
 	/// running; `startingUpdater: true` begins checking for updates at launch.
@@ -46,6 +47,8 @@ struct MokaScreenApp: App {
 					.keyboardShortcut("s", modifiers: [.command, .option])
 				Toggle("Smooth Motion", isOn: $smoothMotion)
 					.keyboardShortcut("m", modifiers: [.command, .option])
+				Toggle("Fixed 120 Hz", isOn: $fixedRefreshRate)
+					.keyboardShortcut("r", modifiers: [.command, .option])
 				Button("Show Latency Clock") { LatencyClock.toggle() }
 					.keyboardShortcut("l", modifiers: [.command, .option])
 				Divider()
@@ -81,10 +84,23 @@ enum SmoothMotionPreference {
 	}
 }
 
+/// Whether the display Mac holds its screen at 120 Hz while showing. On by default: left to
+/// choose, macOS sometimes ran the display Mac's ProMotion panel at 60 Hz under a steady 110 fps
+/// load (see ``RefreshRateRequest``). Off lets ProMotion vary the rate, for experiments.
+enum FixedRefreshRatePreference {
+	static let key = "fixedRefreshRate"
+	static let defaultValue = true
+
+	static func isOn(in defaults: UserDefaults) -> Bool {
+		defaults.object(forKey: key) as? Bool ?? defaultValue
+	}
+}
+
 /// The settings both Macs keep the same while connected.
 struct SharedSettings: Equatable {
 	var showsStatistics: Bool
 	var smoothMotion: Bool
+	var fixedRefreshRate: Bool = FixedRefreshRatePreference.defaultValue
 
 	/// This Mac's settings, from the standard user defaults.
 	static var current: SharedSettings {
@@ -93,12 +109,17 @@ struct SharedSettings: Equatable {
 	}
 
 	static func load(from defaults: UserDefaults) -> SharedSettings {
-		SharedSettings(showsStatistics: defaults.bool(forKey: StatisticsPreference.key), smoothMotion: defaults.bool(forKey: SmoothMotionPreference.key))
+		SharedSettings(
+			showsStatistics: defaults.bool(forKey: StatisticsPreference.key),
+			smoothMotion: defaults.bool(forKey: SmoothMotionPreference.key),
+			fixedRefreshRate: FixedRefreshRatePreference.isOn(in: defaults)
+		)
 	}
 
 	func save(to defaults: UserDefaults) {
 		defaults.set(showsStatistics, forKey: StatisticsPreference.key)
 		defaults.set(smoothMotion, forKey: SmoothMotionPreference.key)
+		defaults.set(fixedRefreshRate, forKey: FixedRefreshRatePreference.key)
 	}
 }
 
