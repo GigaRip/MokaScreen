@@ -86,10 +86,11 @@ CGVirtualDisplay (HiDPI, 120 Hz)
   └─ ScreenCaptureKit, 120 fps, BGRA, dirty rects
        └─ DirtyRegion (tile grid, latest-frame-wins)
             └─ one TCP connection over bridge0 ─────────► recv straight into
-               (Nagle off, writev from the                GPU-shared buffers
-                capture buffer, no copy)                    └─ blit into display texture
-                                                                 └─ present on arrival, 120 Hz
-                ◄──────────────── "presented" acks ───────────── (two drawables in flight)
+               (Nagle off, writev from the                GPU-shared buffers (6)
+                capture buffer, no copy)                    └─ held until due (Smooth Motion)
+                                                                 └─ blit into display texture
+                                                                      └─ present on a refresh, 120 Hz
+                ◄──────────────── "presented" acks ───────────── (up to three drawables in flight)
 ```
 
 - **Bandwidth.** A full frame is ~31 MB; 120 Hz raw is ~30 Gbps and a single TCP
@@ -98,6 +99,16 @@ CGVirtualDisplay (HiDPI, 120 Hz)
 	kilobytes instead of 3.6 ms of wire time.
 - **Latest-frame-wins.** If the network stalls, newer captures replace the waiting
 	one and their changed areas merge, so the display catches up in one step.
+- **Presenting on the display Mac.** With Smooth Motion (on by default) each frame
+	waits in its receive buffer until a refresh before its scheduled time, capture
+	time plus a fixed delay, then is presented on the panel's next refresh, so frames
+	reach the glass spaced as they were captured. A drawable stops counting as in
+	flight when macOS reports it on the glass, or one refresh after its scheduled
+	time if no report comes. While nothing changes, the display Mac presents the
+	unchanged picture every 250 ms: after about a second of stillness, macOS 27.2
+	otherwise never reports the first one or two frames presented, which held up
+	the frames behind them. The display Mac also holds its panel at 120 Hz while
+	showing, because macOS sometimes ran it at 60 Hz under load.
 - **Discovery** is Bonjour, pinned to the Thunderbolt Bridge interface. The
 	display Mac's listening socket is pinned there too, so it cannot be reached over
 	Wi-Fi.
@@ -112,8 +123,10 @@ Open `MokaScreen.xcodeproj` in Xcode, or:
 xcodebuild -project MokaScreen.xcodeproj -scheme MokaScreen -derivedDataPath build/DerivedData test
 ```
 
-The tests cover the wire format, the dirty-region tiling, and a full
-sender → TCP → receiver round trip that checks every pixel.
+The tests cover the wire format, the dirty-region tiling, a full
+sender → TCP → receiver round trip that checks every pixel, Smooth Motion's
+pacing, keeping settings the same on both Macs, frame timing recordings, and the
+bookkeeping of drawables in flight.
 
 ### Trying it on one Mac
 
@@ -122,10 +135,13 @@ sides in one process over loopback, with the received display in a window.
 
 ### Measuring
 
-- **Statistics.** The sender shows capture/send rates, the share of the screen
-	sent per frame, and capture → on-glass latency, measured from the display Mac's
-	presentation callback. *Record statistics to a CSV file* writes one row per
-	second to `~/Library/Logs/MokaScreen/` for studying real workloads.
+- **Statistics.** **Develop › Show Statistics** (⌥⌘S) shows, on the Mac you work
+	on, capture/send rates, the share of the screen sent per frame, and capture →
+	on-glass latency, measured from the display Mac's presentation callback and
+	split into capture + cable, Smooth Motion's hold, and the display Mac's own
+	share. Its colour is green within two refreshes beyond Smooth Motion's delay.
+	*Record statistics to a CSV file* writes one row per second to
+	`~/Library/Logs/MokaScreen/` for studying real workloads.
 - **Glass-to-glass latency.** **Develop › Show Latency Clock** (⌥⌘L) puts a
 	millisecond clock on every screen, including the extended one.
 	Film both MacBooks with a high-speed camera and subtract the readings in one
@@ -143,8 +159,12 @@ sides in one process over loopback, with the received display in a window.
 	capture spacing by more than half a refresh.
 - **Frame timing.** **Develop › Record Frame Timing** (⌥⌘T), on the Mac you work
 	on while connected, records 10 seconds of every frame's capture, send,
-	arrival, draw, and glass times on both Macs, and writes one CSV row per capture
-	to `~/Library/Logs/MokaScreen/`.
+	arrival, draw, scheduled, and glass times on both Macs, and writes one CSV row
+	per capture to `~/Library/Logs/MokaScreen/`.
+- **Fixed 120 Hz.** **Develop › Fixed 120 Hz** (⌥⌘R), on by default, holds the
+	display Mac's panel at 120 Hz while showing; turned off, ProMotion chooses the
+	rate. Smooth Motion lines frames up with the panel's refreshes only while it
+	is on.
 - **Dirty-rectangle audit.** `defaults write com.gigarip.mokascreen AuditDirtyRects -bool YES`
 	makes the sender diff every captured frame against the previous one and log
 	any changed tile ScreenCaptureKit did not report.
