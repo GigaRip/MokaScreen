@@ -84,13 +84,15 @@ final class FrameTimingRecorder: Sendable {
 		if isActive { displays.append(display) }
 	}
 
-	static let csvHeader = "capture_ms,capture_gap_ms,submit_lag_ms,dirty_rects,frame_id,send_start_lag_ms,send_ms,bytes,rects,coverage,received_ms,drawn_ms,glass_ms,glass_gap_ms,drawn_together,paced"
+	static let csvHeader = "capture_ms,capture_gap_ms,submit_lag_ms,dirty_rects,frame_id,send_start_lag_ms,send_ms,bytes,rects,coverage,received_ms,drawn_ms,glass_ms,glass_gap_ms,drawn_together,paced,target_ms"
 
 	/// One row per capture, oldest first. Times in each group share an origin: capture and send
 	/// columns the first capture on this Mac's clock; received, drawn and glass columns the first
 	/// frame received on the display Mac's clock. A capture with no frame ID was replaced by a
 	/// newer one before it could be sent. `glass_gap_ms` is the time since the previous frame
-	/// reached the glass; frames drawn together share a glass time.
+	/// reached the glass; frames drawn together share a glass time. `target_ms` is when Smooth
+	/// Motion asked for the frame to be presented, on the display Mac's clock; empty when it was
+	/// presented at once.
 	static func csv(captures: [Capture], sends: [Send], displays: [FrameTimingMessage]) -> String {
 		var sendByCapture: [UInt64: Send] = [:]
 		for send in sends where sendByCapture[send.captureTime] == nil {
@@ -137,6 +139,9 @@ final class FrameTimingRecorder: Sendable {
 						gapField = previousGlass.map { ms(glass, from: $0) } ?? ""
 						previousGlass = glass
 					}
+					let target = display.targetAfterDrawTenths > 0
+						? ms(display.drawTime &+ UInt64(display.targetAfterDrawTenths) * 100_000, from: receiveOrigin)
+						: ""
 					fields += [
 						ms(received, from: receiveOrigin),
 						ms(display.drawTime, from: receiveOrigin),
@@ -144,12 +149,13 @@ final class FrameTimingRecorder: Sendable {
 						gapField,
 						String(display.drawnTogether),
 						display.paced ? "1" : "0",
+						target,
 					]
 				} else {
-					fields += Array(repeating: "", count: 6)
+					fields += Array(repeating: "", count: 7)
 				}
 			} else {
-				fields += Array(repeating: "", count: 12)
+				fields += Array(repeating: "", count: 13)
 			}
 			lines.append(fields.joined(separator: ","))
 		}

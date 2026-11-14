@@ -356,8 +356,9 @@ final class FrameRenderer: FrameSink {
 		var timing: [FrameTimingMessage] = []
 		if recordsTiming, onFrameTiming != nil, !current.isEmpty {
 			let drawTime = HostClock.now
+			let target = pacedGlass.map { UInt16(clamping: ($0 &- drawTime) / 100_000) } ?? 0
 			timing = current.map {
-				FrameTimingMessage(frameID: $0.frameID, drawTime: drawTime, receivedBeforeDrawMicros: UInt32(clamping: (drawTime &- $0.receivedTime) / 1000), glassAfterDrawMicros: -1, drawnTogether: UInt16(clamping: current.count), paced: pacedGlass != nil)
+				FrameTimingMessage(frameID: $0.frameID, drawTime: drawTime, receivedBeforeDrawMicros: UInt32(clamping: (drawTime &- $0.receivedTime) / 1000), glassAfterDrawMicros: -1, drawnTogether: UInt16(clamping: current.count), paced: pacedGlass != nil, targetAfterDrawTenths: target)
 			}
 		}
 		let onFrameTiming = onFrameTiming

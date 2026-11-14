@@ -31,7 +31,7 @@ import Testing
 		let displayBase: UInt64 = 5_000 * ms
 		let displays = [
 			FrameTimingMessage(frameID: 1, drawTime: displayBase + ms, receivedBeforeDrawMicros: 1000, glassAfterDrawMicros: 7000, drawnTogether: 1, paced: false),
-			FrameTimingMessage(frameID: 2, drawTime: displayBase + 18 * ms, receivedBeforeDrawMicros: 500, glassAfterDrawMicros: 6000, drawnTogether: 1, paced: true),
+			FrameTimingMessage(frameID: 2, drawTime: displayBase + 18 * ms, receivedBeforeDrawMicros: 500, glassAfterDrawMicros: 6000, drawnTogether: 1, paced: true, targetAfterDrawTenths: 55),
 			FrameTimingMessage(frameID: 3, drawTime: displayBase + 30 * ms, receivedBeforeDrawMicros: 200, glassAfterDrawMicros: -1, drawnTogether: 1, paced: false),
 		]
 
@@ -39,7 +39,7 @@ import Testing
 			.split(separator: "\n").map { $0.split(separator: ",", omittingEmptySubsequences: false).map(String.init) }
 		#expect(rows.first?.joined(separator: ",") == FrameTimingRecorder.csvHeader)
 		#expect(rows.count == 5)
-		#expect(rows.dropFirst().allSatisfy { $0.count == 16 })
+		#expect(rows.dropFirst().allSatisfy { $0.count == 17 })
 
 		// First frame: received at the display origin, on glass 8 ms later.
 		#expect(rows[1][0] == "0.000")
@@ -53,6 +53,9 @@ import Testing
 		#expect(rows[3][12] == "24.000")
 		#expect(rows[3][13] == "16.000")
 		#expect(rows[3][15] == "1")
+		// Asked for at 23.5 ms, half a millisecond before it reached the glass.
+		#expect(rows[3][16] == "23.500")
+		#expect(rows[1][16].isEmpty)
 		// Third frame: drawn, never shown.
 		#expect(rows[4][11] == "30.000")
 		#expect(rows[4][12].isEmpty)

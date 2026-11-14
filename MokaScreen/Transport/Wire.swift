@@ -278,8 +278,9 @@ struct TimingRequestMessage: Equatable {
 /// Receiver → sender, while a timing request lasts: when one frame arrived, was drawn, and
 /// reached the glass, on the display Mac's clock.
 ///
-/// Layout: flags at 4 (bits 0–15 `drawnTogether`, bit 31 `paced`), `frameID` at 8, `drawTime`
-/// at 16, `receivedBeforeDrawMicros` at 24, `glassAfterDrawMicros` at 28.
+/// Layout: flags at 4 (bits 0–15 `drawnTogether`, bits 16–30 `targetAfterDrawTenths`, bit 31
+/// `paced`), `frameID` at 8, `drawTime` at 16, `receivedBeforeDrawMicros` at 24,
+/// `glassAfterDrawMicros` at 28.
 struct FrameTimingMessage: Equatable, BitwiseCopyable {
 	var frameID: UInt64
 	/// Host nanoseconds on the display Mac when the draw that applied this frame was encoded.
@@ -292,11 +293,14 @@ struct FrameTimingMessage: Equatable, BitwiseCopyable {
 	var drawnTogether: UInt16
 	/// Whether Smooth Motion held the draw for a paced glass time.
 	var paced: Bool
+	/// When Smooth Motion asked for the drawable to be presented, in tenths of a millisecond after
+	/// the draw, up to 3.2 s; zero when presented at once.
+	var targetAfterDrawTenths: UInt16 = 0
 
 	func encode(into p: UnsafeMutableRawPointer) {
 		WireHeader.clear(p)
 		WireHeader.store(MessageType.frameTiming.rawValue, p, 0)
-		WireHeader.store(UInt32(drawnTogether) | (paced ? 1 << 31 : 0), p, 4)
+		WireHeader.store(UInt32(drawnTogether) | UInt32(min(targetAfterDrawTenths, 0x7FFF)) << 16 | (paced ? 1 << 31 : 0), p, 4)
 		WireHeader.store(frameID, p, 8)
 		WireHeader.store(drawTime, p, 16)
 		WireHeader.store(receivedBeforeDrawMicros, p, 24)
@@ -312,7 +316,8 @@ struct FrameTimingMessage: Equatable, BitwiseCopyable {
 			receivedBeforeDrawMicros: WireHeader.load32(p, 24),
 			glassAfterDrawMicros: Int32(bitPattern: WireHeader.load32(p, 28)),
 			drawnTogether: UInt16(truncatingIfNeeded: flags),
-			paced: flags & (1 << 31) != 0
+			paced: flags & (1 << 31) != 0,
+			targetAfterDrawTenths: UInt16((flags >> 16) & 0x7FFF)
 		)
 	}
 }

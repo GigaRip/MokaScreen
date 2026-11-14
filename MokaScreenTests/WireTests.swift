@@ -38,7 +38,7 @@ struct WireTests {
 
 	@Test func frameTimingRoundTripsIncludingAFrameNeverShown() throws {
 		for message in [
-			FrameTimingMessage(frameID: 9_000_000_001, drawTime: 123_456_789_012, receivedBeforeDrawMicros: 410, glassAfterDrawMicros: 7_900, drawnTogether: 2, paced: true),
+			FrameTimingMessage(frameID: 9_000_000_001, drawTime: 123_456_789_012, receivedBeforeDrawMicros: 410, glassAfterDrawMicros: 7_900, drawnTogether: 2, paced: true, targetAfterDrawTenths: 77),
 			FrameTimingMessage(frameID: 3, drawTime: 1, receivedBeforeDrawMicros: 0, glassAfterDrawMicros: -1, drawnTogether: 1, paced: false),
 		] {
 			#expect(try roundTrip(message.encode, FrameTimingMessage.decode) == message)
