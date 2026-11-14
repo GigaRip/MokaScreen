@@ -5,7 +5,7 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 ## Targets and constraints
 
 - **Hardware:** M5 Pro/Max MacBook Pro 16" (3456×2234 native, 120 Hz) on both ends. Older Macs are explicitly unsupported.
-- **OS:** macOS Tahoe 26.2+.
+- **OS:** macOS 27.2+. MokaScreen has only been run on 27.2, and the private CGVirtualDisplay API it uses was mapped there.
 - **No recoveryOS changes, no kexts, no entitlements requiring Apple approval.** RDMA over Thunderbolt is ruled out because it requires recoveryOS enablement.
 - One machine may be MDM-managed (work Mac); the app must be a normal user-space app.
 - Language: Swift throughout.

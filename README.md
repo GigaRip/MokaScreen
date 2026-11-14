@@ -15,7 +15,7 @@ driver, no kernel extension.
 
 - Two **MacBook Pro with M4 Pro, M4 Max, M5 Pro, or M5 Max**, 14-inch or 16-inch, in
 	any combination.
-- **macOS Tahoe 26.2 or later** on both.
+- **macOS 27.2 or later** on both.
 - A **Thunderbolt 4 or 5 cable** between them.
 
 Thunderbolt 5 is best. Over Thunderbolt 4 — a Thunderbolt 4 cable, or a MacBook Pro
