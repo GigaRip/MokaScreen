@@ -65,10 +65,12 @@ final class MetalLayerView: NSView {
 /// arrival removes the wait for the tick and lets ProMotion refresh the panel as soon as the frame
 /// is ready.
 ///
-/// Up to two drawables are in flight, three under Smooth Motion, which holds each one until its
-/// paced glass time; frames that arrive while the limit is reached are folded into the next draw
-/// instead of queuing behind them. Presenting on arrival does not by itself
-/// tell macOS what refresh rate the screen needs; ``RefreshRateRequest`` does.
+/// Up to two drawables are in flight, three under Smooth Motion; frames that arrive while the
+/// limit is reached are folded into the next draw instead of queuing behind them. Under Smooth
+/// Motion a frame waits in its receive slot until the renderer says it is due, a refresh before
+/// its paced glass time, so the thread sleeps until then rather than drawing on arrival.
+/// Presenting on arrival does not by itself tell macOS what refresh rate the screen needs;
+/// ``RefreshRateRequest`` does.
 final class PresentationDriver {
 	static let maxInFlight = 2
 	static let maxInFlightPaced = 3
@@ -123,16 +125,37 @@ final class PresentationDriver {
 	}
 
 	private func run() {
+		// When to look again without a wake-up: nil to sleep until a frame arrives, or the host time
+		// a waiting frame becomes due.
+		var recheck: UInt64?
 		while true {
-			wake.wait()
+			if let recheck {
+				let now = HostClock.now
+				if recheck > now {
+					_ = wake.wait(timeout: .now() + .nanoseconds(Int(recheck - now)))
+				}
+			} else {
+				wake.wait()
+			}
 			let (isStopped, isPaused) = condition.withLock { (stopped, paused) }
 			if isStopped { return }
 			if isPaused {
+				recheck = nil
 				renderer.absorb()
 				continue
 			}
 			guard waitForRoom() else { return }
-			guard renderer.hasWork, let drawable = layer.nextDrawable() else { continue }
+			guard let due = renderer.nextDrawTime() else {
+				recheck = nil
+				continue
+			}
+			if due > HostClock.now &+ 500_000 {
+				recheck = due
+				continue
+			}
+			// More frames may be waiting behind this one; look again straight after drawing.
+			recheck = 0
+			guard let drawable = layer.nextDrawable() else { continue }
 			let current = condition.withLock {
 				inFlight += 1
 				return epoch

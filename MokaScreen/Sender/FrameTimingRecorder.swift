@@ -44,15 +44,24 @@ final class FrameTimingRecorder: Sendable {
 	let sends = RecordBuffer<Send>(capacity: capacity)
 	let displays = RecordBuffer<FrameTimingMessage>(capacity: capacity)
 	private let active = Atomic<Bool>(false)
+	/// Host nanoseconds after which captures and sends are no longer recorded, so they cover the
+	/// same span as the display Mac's reports, which keep arriving until ``stop()``.
+	private let capturesUntil = Atomic<UInt64>(.max)
 
 	var isActive: Bool { active.load(ordering: .relaxed) }
 
-	/// Clears the previous recording and starts a new one.
-	func start() {
+	private var recordsFrames: Bool {
+		isActive && HostClock.now < capturesUntil.load(ordering: .relaxed)
+	}
+
+	/// Clears the previous recording and starts a new one, recording captures and sends for
+	/// `seconds` (indefinitely when nil) and the display Mac's reports until ``stop()``.
+	func start(seconds: Double? = nil) {
 		active.store(false, ordering: .sequentiallyConsistent)
 		captures.reset()
 		sends.reset()
 		displays.reset()
+		capturesUntil.store(seconds.map { HostClock.now &+ UInt64($0 * 1e9) } ?? .max, ordering: .sequentiallyConsistent)
 		active.store(true, ordering: .sequentiallyConsistent)
 	}
 
@@ -62,12 +71,12 @@ final class FrameTimingRecorder: Sendable {
 
 	/// Capture queue only.
 	func record(_ capture: Capture) {
-		if isActive { captures.append(capture) }
+		if recordsFrames { captures.append(capture) }
 	}
 
 	/// Send thread only.
 	func record(_ send: Send) {
-		if isActive { sends.append(send) }
+		if recordsFrames { sends.append(send) }
 	}
 
 	/// Acknowledgement thread only.

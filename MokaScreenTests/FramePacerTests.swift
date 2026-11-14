@@ -39,14 +39,56 @@ struct FramePacerTests {
 		#expect(pacer.delay == 3_500_000)
 	}
 
-	@Test func delayNeverExceedsOneRefresh() {
+	@Test func delayNeverExceedsThreeRefreshes() {
 		var pacer = FramePacer()
 		for n in 0..<240 {
 			let capture = UInt64(n) * Self.refresh
-			let trip: UInt64 = n % 2 == 0 ? 1_000_000 : 30_000_000
+			let trip: UInt64 = n % 2 == 0 ? 1_000_000 : 40_000_000
 			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + trip)
 		}
 		#expect(pacer.delay == FramePacer.maximumDelayNanos)
+		#expect(FramePacer.maximumDelayNanos == 25_000_000)
+	}
+
+	@Test func delayHoldsThroughTheNextSecondThenFalls() {
+		var pacer = FramePacer()
+		var n: UInt64 = 0
+		// A second of a scroll whose trips swing between 2 and 20 ms.
+		for _ in 0..<120 {
+			let capture = n * Self.refresh
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + (n % 2 == 0 ? 2_000_000 : 20_000_000))
+			n += 1
+		}
+		#expect(pacer.delay == 18_500_000)
+		// Then steady 2 ms trips. The jittery second still counts for the next second, which keeps
+		// the delay up through a scroll's slow end.
+		func steady(_ frames: Int) {
+			for _ in 0..<frames {
+				let capture = n * Self.refresh
+				pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + 2_000_000)
+				n += 1
+			}
+		}
+		steady(90)
+		#expect(pacer.delay == 18_500_000)
+		// Once it has gone, the excess falls to a quarter at each update: under a millisecond
+		// within three quarters of a second.
+		steady(120)
+		#expect(pacer.delay < 1_000_000)
+	}
+
+	@Test func aPauseStartsTheScheduleAfresh() {
+		var pacer = FramePacer()
+		var capture: UInt64 = 0
+		for i in 0..<120 {
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + (i % 2 == 0 ? 2_000_000 : 20_000_000))
+			capture += Self.refresh
+		}
+		#expect(pacer.delay == 18_500_000)
+		// A second and a half with nothing changing, then a keystroke.
+		capture += 1_500_000_000
+		pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + 2_000_000)
+		#expect(pacer.delay == FramePacer.minimumDelayNanos)
 	}
 
 	@Test func unevenFramesAreCountedAgainstTheirCaptureSpacing() {

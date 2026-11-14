@@ -98,7 +98,7 @@ final class FrameSender {
 	/// Starts recording per-frame timing on both Macs for `seconds`. Read the result with
 	/// ``FrameTimingRecorder/write()`` on ``timing`` once the time is up.
 	func recordFrameTiming(seconds: Double) {
-		timing.start()
+		timing.start(seconds: seconds)
 		condition.lock()
 		pendingTimingRequest = TimingRequestMessage(durationMillis: UInt32(seconds * 1000))
 		condition.signal()

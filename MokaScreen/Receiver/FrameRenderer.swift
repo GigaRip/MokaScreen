@@ -31,8 +31,10 @@ enum RendererError: Error, CustomStringConvertible {
 /// into a private display texture, then draws that texture to the drawable. Only the newest state
 /// is ever presented.
 final class FrameRenderer: FrameSink {
-	/// Slots in the receive ring: one being filled, one waiting to be drawn, one being blitted.
-	static let slotCount = 3
+	/// Slots in the receive ring: one being filled, one being blitted, and the rest for frames
+	/// waiting to be drawn. Smooth Motion holds a frame here until a refresh before its glass
+	/// time, up to ``FramePacer/maximumDelayNanos`` (three refreshes) after it arrives.
+	static let slotCount = 6
 
 	let device: MTLDevice
 	private let commandQueue: MTLCommandQueue
@@ -51,6 +53,8 @@ final class FrameRenderer: FrameSink {
 	private var timingUntil: UInt64 = 0
 	/// Render thread only.
 	private var pacer = FramePacer()
+	/// The newest frame whose trip the pacer has recorded. Render thread only.
+	private var pacedThrough: UInt64 = 0
 
 	/// Whether frames are presented at their paced glass time rather than as soon as they are
 	/// drawn. Thread-safe; takes effect from the next draw.
@@ -226,20 +230,58 @@ final class FrameRenderer: FrameSink {
 		work?()
 	}
 
-	/// Whether a frame or a redraw is waiting.
-	var hasWork: Bool {
-		lock.withLock { !pending.isEmpty || needsRedraw }
-	}
-
 	// MARK: Drawing (render thread)
 
-	/// Applies every completed frame and draws the result, calling `whenShown` once the drawable
-	/// has been presented or dropped. Returns false without presenting when nothing changed,
-	/// which leaves the previous image on screen.
+	/// When the next draw is due, in host nanoseconds; nil when nothing is waiting.
+	///
+	/// Without Smooth Motion every frame is due on arrival. With it, a frame is due one refresh
+	/// before its paced glass time, so it waits in its receive slot rather than in a drawable:
+	/// macOS gives a layer at most three drawables, fewer than the frames that can be waiting
+	/// under a delay of three refreshes.
+	func nextDrawTime() -> UInt64? {
+		lock.lock()
+		defer { lock.unlock() }
+		recordTrips()
+		if needsRedraw { return 0 }
+		guard let oldest = pending.first else { return nil }
+		guard pacesFrames else { return 0 }
+		return drawTime(of: oldest)
+	}
+
+	/// Records the trip of every frame that has arrived since the last call. Caller holds `lock`.
+	private func recordTrips() {
+		for frame in pending where frame.frameID > pacedThrough {
+			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
+			pacedThrough = frame.frameID
+		}
+	}
+
+	/// When a waiting frame should be drawn under Smooth Motion: a refresh before its glass time,
+	/// and never more than the pacer's cap after it arrived, in case the clock estimate is off.
+	private func drawTime(of frame: ReceivedFrame) -> UInt64 {
+		guard let glass = pacer.glassTime(captureTime: frame.captureTime) else { return 0 }
+		let lead = UInt64(refreshInterval * 1e9)
+		let latest = frame.receivedTime &+ UInt64(FramePacer.maximumDelayNanos)
+		return min(glass > lead ? glass - lead : 0, latest)
+	}
+
+	/// Applies every frame that is due (see ``nextDrawTime()``) and draws the result, calling
+	/// `whenShown` once the drawable has been presented or dropped. Returns false without
+	/// presenting when nothing changed, which leaves the previous image on screen.
 	func draw(to drawable: CAMetalDrawable, whenShown: @escaping () -> Void) -> Bool {
 		lock.lock()
-		let frames = pending
-		pending.removeAll(keepingCapacity: true)
+		recordTrips()
+		let frames: [ReceivedFrame]
+		if pacesFrames {
+			// Frames due within half a millisecond are drawn now rather than a wake-up later.
+			let horizon = HostClock.now &+ 500_000
+			let due = pending.prefix { drawTime(of: $0) <= horizon }.count
+			frames = Array(pending.prefix(due))
+			pending.removeFirst(due)
+		} else {
+			frames = pending
+			pending.removeAll(keepingCapacity: true)
+		}
 		let redraw = needsRedraw
 		needsRedraw = false
 		let surface = surface
@@ -262,9 +304,6 @@ final class FrameRenderer: FrameSink {
 		surface.hasContent = true
 		let receivedTimes = current.map(\.receivedTime)
 		stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
-		for frame in current {
-			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
-		}
 		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.delay) / 1e6 : 0)
 		encodeBlit(current, to: surface, in: commandBuffer)
 
