@@ -137,7 +137,10 @@ struct SenderStatsView: View {
 		StatRow("Captured", String(format: "%.0f fps", stats.capturedFPS))
 		StatRow("Sent", String(format: "%.0f fps  ·  %.2f Gbps", stats.sentFPS, stats.gigabitsPerSecond))
 		StatRow("Shown on the display Mac", stats.displayPresentedFPS > 0 ? String(format: "%.0f fps", stats.displayPresentedFPS) : "—")
-		StatRow("Drawn on the display Mac", stats.displayDrawsPerSecond > 0 ? String(format: "%.0f times a second  ·  %.1f ms wait", stats.displayDrawsPerSecond, stats.displayWait) : "—")
+		// Draws, not frames: one draw can apply several frames, so fewer draws than frames shown
+		// means frames were folded together. Under Smooth Motion the time from a frame's arrival to
+		// its draw is mostly its deliberate hold, so it reads "held" rather than "wait".
+		StatRow("Drawn on the display Mac", stats.displayDrawsPerSecond > 0 ? String(format: "%.0f draws a second  ·  %.1f ms %@", stats.displayDrawsPerSecond, stats.displayWait, stats.displayPacing > 0 ? "held" : "wait") : "—")
 		StatRow("Uneven frames", unevenFrames)
 		StatRow("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100))
 		StatRow("Superseded", "\(stats.supersededFrames) frames")
