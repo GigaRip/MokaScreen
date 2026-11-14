@@ -41,7 +41,7 @@ let title = NSAttributedString(string: "MokaScreen", attributes: [
 	.kern: -1.5,
 ])
 title.draw(at: NSPoint(x: 470, y: 330))
-let tagline = NSAttributedString(string: "Use a second MacBook\nas an extended display.", attributes: [
+let tagline = NSAttributedString(string: "Use a second MacBook\nas an extended Retina display.", attributes: [
 	.font: NSFont.systemFont(ofSize: 40, weight: .regular),
 	.foregroundColor: muted,
 ])
