@@ -38,6 +38,9 @@ struct SenderView: View {
 					.disabled(session.isRunning)
 				}
 				InfoRow("Thunderbolt", model.bridge.summary)
+				if showsStatistics {
+					BridgeDetailRows(bridge: model.bridge)
+				}
 				if session.receivers.count > 1 {
 					InfoRow(label: "Display Mac") {
 						Picker("Display Mac", selection: $session.preferredReceiver) {
@@ -51,10 +54,11 @@ struct SenderView: View {
 
 			// Nothing can be measured until Screen Recording is allowed.
 			if showsStatistics, session.status != .needsPermission {
-				LatencyBreakdown(stats: session.stats, history: session.history, refreshRate: session.refreshRate ?? 120)
+				if LatencyBreakdown.hasMeasurements(stats: session.stats, history: session.history) {
+					LatencyBreakdown(stats: session.stats, history: session.history, refreshRate: session.refreshRate ?? 120)
+				}
 				InfoSection {
 					SenderStatsView(stats: session.stats)
-					BridgeDetailRows(bridge: model.bridge)
 					InfoRow(label: "Record to a CSV file") {
 						Toggle("Record to a CSV file", isOn: $session.recordsStats)
 							.labelsHidden()

@@ -30,6 +30,12 @@ struct LatencyBreakdown: View {
 	private var captureAndCable: Double { max(0, total - display) }
 	private var hasReport: Bool { stats.displayDelay > 0 }
 
+	/// Whether a frame has reached the display Mac's screen in the latest second or the charted
+	/// minute. Until then the panel has nothing to show and is left out.
+	static func hasMeasurements(stats: SenderSnapshot, history: [SenderSnapshot]) -> Bool {
+		stats.recentLatency > 0 || history.contains { $0.recentLatency > 0 }
+	}
+
 	var body: some View {
 		VStack(alignment: .leading, spacing: 16) {
 			headline
@@ -60,10 +66,7 @@ struct LatencyBreakdown: View {
 			}
 			Spacer()
 			VStack(alignment: .trailing, spacing: 2) {
-				Text("CAPTURE → ON GLASS")
-					.font(.system(size: 10, weight: .bold, design: .rounded))
-					.tracking(1.1)
-					.foregroundStyle(.secondary)
+				Self.sectionLabel("CAPTURE → ON GLASS")
 				if total > 0 {
 					Text(String(format: "%.2f refreshes at %d Hz", total / frameBudget, refreshRate))
 						.font(.callout.monospacedDigit())
@@ -77,10 +80,7 @@ struct LatencyBreakdown: View {
 
 	private var legend: some View {
 		HStack(spacing: 12) {
-			Text("LAST MINUTE")
-				.font(.system(size: 10, weight: .bold, design: .rounded))
-				.tracking(1.1)
-				.foregroundStyle(.secondary)
+			Self.sectionLabel("LAST MINUTE")
 			Spacer()
 			LegendSwatch(label: "Capture + cable", color: Self.captureColor)
 			LegendSwatch(label: "Display Mac", color: Self.displayColor)
@@ -130,6 +130,13 @@ struct LatencyBreakdown: View {
 		if total <= frameBudget * 2 { return .green }
 		if total <= frameBudget * 3 { return .orange }
 		return .red
+	}
+
+	private static func sectionLabel(_ text: String) -> some View {
+		Text(text)
+			.font(.system(size: 10, weight: .bold, design: .rounded))
+			.tracking(1.1)
+			.foregroundStyle(.secondary)
 	}
 
 	static let captureColor = Color.teal

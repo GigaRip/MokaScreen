@@ -69,18 +69,17 @@ extension Optional where Wrapped == BridgeState {
 	}
 }
 
-/// The bridge's interface and addresses, for the statistics section.
+/// The bridge's addresses, shown under Thunderbolt when statistics are on.
 struct BridgeDetailRows: View {
 	let bridge: BridgeState?
 
 	var body: some View {
-		if let bridge {
-			InfoRow("Bridge interface", "\(bridge.name) · index \(bridge.index)")
-			if !bridge.addresses.isEmpty {
-				InfoRow(label: "Addresses") {
-					Text(bridge.addresses.joined(separator: "\n"))
-						.textSelection(.enabled)
-				}
+		// The IPv6 link-local address carries the interface name as its zone (`%bridge0`), so the
+		// name needs no row of its own.
+		if let bridge, !bridge.addresses.isEmpty {
+			InfoRow(label: "Addresses") {
+				Text(bridge.addresses.joined(separator: "\n"))
+					.textSelection(.enabled)
 			}
 		}
 	}

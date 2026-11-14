@@ -21,12 +21,7 @@ struct ReceiverView: View {
 			InfoSection {
 				InfoRow("Appears as", session.serviceName)
 				InfoRow("Thunderbolt", model.bridge.summary)
-			}
-
-			if showsStatistics {
-				// The rates and latency are in the overlay on the shared screen; the window keeps
-				// what the overlay does not show.
-				InfoSection {
+				if showsStatistics {
 					BridgeDetailRows(bridge: model.bridge)
 				}
 			}
