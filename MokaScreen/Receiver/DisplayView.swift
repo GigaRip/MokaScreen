@@ -9,6 +9,7 @@
 
 import AppKit
 import Metal
+import os
 import QuartzCore
 import Synchronization
 
@@ -75,20 +76,24 @@ final class MetalLayerView: NSView {
 final class PresentationDriver {
 	static let maxInFlight = 2
 	static let maxInFlightPaced = 3
-	/// How long to wait for a drawable to be reported presented before drawing anyway, so a report
-	/// that never comes cannot freeze the screen.
-	private static let presentTimeout: TimeInterval = 0.1
+	/// How long after its glass time a drawable may go unreported before it stops counting as in
+	/// flight. After the picture has been still for about a second, macOS 27.2 never calls the
+	/// presented handler for the first one or two drawables presented, though later ones report
+	/// normally (measured 2026-11-14 on a ProMotion MacBook Pro whose display link kept ticking at
+	/// 120 Hz throughout). Waiting a flat 100 ms for those reports stalled drawing for up to that
+	/// long whenever motion resumed. Reported drawables arrive within about one refresh of their
+	/// glass time, so two refreshes never cuts one short.
+	static let reportGraceRefreshes = 2.0
 
 	private let layer: CAMetalLayer
 	private let renderer: FrameRenderer
 	private let wake = DispatchSemaphore(value: 0)
-	/// Guards `stopped`, `inFlight`, and `epoch`, and signals when a drawable is presented.
+	/// Guards `stopped`, `paused`, and `inFlight`, and signals when a drawable is presented.
 	private let condition = NSCondition()
 	private var stopped = false
 	private var paused = false
-	private var inFlight = 0
-	/// Advances when a timeout clears `inFlight`, so reports for drawables from before it are ignored.
-	private var epoch = 0
+	private var inFlight = InFlightDrawables()
+	private var nextToken: UInt64 = 0
 
 	init(layer: CAMetalLayer, renderer: FrameRenderer) {
 		self.layer = layer
@@ -157,39 +162,90 @@ final class PresentationDriver {
 			// More frames may be waiting behind this one; look again straight after drawing.
 			recheck = 0
 			guard let drawable = layer.nextDrawable() else { continue }
-			let current = condition.withLock {
-				inFlight += 1
-				return epoch
+			let grace = UInt64(renderer.refreshInterval * Self.reportGraceRefreshes * 1e9)
+			// Counted before drawing, as the presented handler can run before draw returns; the
+			// deadline is set from the glass time once draw has chosen it.
+			let token = condition.withLock {
+				nextToken &+= 1
+				inFlight.add(token: nextToken, deadline: HostClock.now &+ UInt64(FramePacer.maximumDelayNanos) &+ grace)
+				return nextToken
 			}
-			let presented = renderer.draw(to: drawable) { [weak self] in self?.presented(current) }
-			if !presented {
-				self.presented(current)
+			if let glass = renderer.draw(to: drawable, whenShown: { [weak self] in self?.presented(token) }) {
+				condition.withLock { inFlight.setDeadline(max(glass, HostClock.now) &+ grace, for: token) }
+			} else {
+				presented(token)
 			}
 		}
 	}
 
 	/// Waits until fewer than ``maxInFlight`` (or ``maxInFlightPaced``) drawables are in flight,
-	/// or the timeout passes. Returns false once stopped.
+	/// counting one whose report is overdue as no longer in flight. Returns false once stopped.
 	private func waitForRoom() -> Bool {
 		let limit = renderer.smoothMotion ? Self.maxInFlightPaced : Self.maxInFlight
 		return condition.withLock {
-			let deadline = Date(timeIntervalSinceNow: Self.presentTimeout)
-			while inFlight >= limit, !stopped {
-				if !condition.wait(until: deadline) {
-					inFlight = 0
-					epoch &+= 1
+			while !stopped {
+				let now = HostClock.now
+				let lost = inFlight.expire(now: now)
+				if lost > 0 {
+					Log.render.debug("\(lost, privacy: .public) drawable(s) never reported presented; drawing on")
 				}
+				guard inFlight.count >= limit, let next = inFlight.earliestDeadline else { return true }
+				condition.wait(until: Date(timeIntervalSinceNow: Double(next &- now) / 1e9))
 			}
-			return !stopped
+			return false
 		}
 	}
 
-	private func presented(_ drawableEpoch: Int) {
+	private func presented(_ token: UInt64) {
 		condition.withLock {
-			guard drawableEpoch == epoch, inFlight > 0 else { return }
-			inFlight -= 1
-			condition.signal()
+			if inFlight.complete(token: token) {
+				condition.signal()
+			}
 		}
+	}
+}
+
+/// The drawables presented but not yet reported, each with the host time after which it no longer
+/// counts as in flight. Holds at most a few entries; used under ``PresentationDriver``'s lock.
+struct InFlightDrawables {
+	private var entries: [(token: UInt64, deadline: UInt64)] = []
+
+	init() {
+		entries.reserveCapacity(8)
+	}
+
+	var count: Int { entries.count }
+
+	var earliestDeadline: UInt64? {
+		var earliest: UInt64?
+		for entry in entries where entry.deadline < earliest ?? .max {
+			earliest = entry.deadline
+		}
+		return earliest
+	}
+
+	mutating func add(token: UInt64, deadline: UInt64) {
+		entries.append((token, deadline))
+	}
+
+	mutating func setDeadline(_ deadline: UInt64, for token: UInt64) {
+		if let index = entries.firstIndex(where: { $0.token == token }) {
+			entries[index].deadline = deadline
+		}
+	}
+
+	/// Removes a drawable that reported; false if it had already expired or never counted.
+	mutating func complete(token: UInt64) -> Bool {
+		guard let index = entries.firstIndex(where: { $0.token == token }) else { return false }
+		entries.remove(at: index)
+		return true
+	}
+
+	/// Removes every drawable past its deadline and returns how many there were.
+	mutating func expire(now: UInt64) -> Int {
+		let before = entries.count
+		entries.removeAll { $0.deadline <= now }
+		return before - entries.count
 	}
 }
 

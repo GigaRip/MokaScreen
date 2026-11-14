@@ -51,6 +51,39 @@ import Testing
 	}
 }
 
+@Suite struct InFlightDrawablesTests {
+	@Test func aReportFreesItsDrawable() {
+		var drawables = InFlightDrawables()
+		drawables.add(token: 1, deadline: 100)
+		drawables.add(token: 2, deadline: 200)
+		let first = drawables.complete(token: 1)
+		let again = drawables.complete(token: 1)
+		#expect(first)
+		#expect(!again)
+		#expect(drawables.count == 1)
+	}
+
+	@Test func aDrawableThatNeverReportsStopsCountingAtItsDeadline() {
+		var drawables = InFlightDrawables()
+		drawables.add(token: 1, deadline: 1_000)
+		drawables.add(token: 2, deadline: 5_000)
+		drawables.setDeadline(3_000, for: 2)
+		#expect(drawables.earliestDeadline == 1_000)
+		let early = drawables.expire(now: 999)
+		let due = drawables.expire(now: 1_000)
+		#expect(early == 0)
+		#expect(due == 1)
+		#expect(drawables.count == 1)
+		#expect(drawables.earliestDeadline == 3_000)
+		// A late report for an expired drawable changes nothing.
+		let late = drawables.complete(token: 1)
+		#expect(!late)
+		let last = drawables.expire(now: 3_000)
+		#expect(last == 1)
+		#expect(drawables.earliestDeadline == nil)
+	}
+}
+
 @Suite struct DisplayTicksTests {
 	private let interval: UInt64 = 8_333_333
 

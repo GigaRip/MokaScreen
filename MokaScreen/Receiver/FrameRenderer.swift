@@ -288,9 +288,10 @@ final class FrameRenderer: FrameSink {
 	}
 
 	/// Applies every frame that is due (see ``nextDrawTime()``) and draws the result, calling
-	/// `whenShown` once the drawable has been presented or dropped. Returns false without
-	/// presenting when nothing changed, which leaves the previous image on screen.
-	func draw(to drawable: CAMetalDrawable, whenShown: @escaping () -> Void) -> Bool {
+	/// `whenShown` once the drawable has been presented or dropped. Returns the host time the
+	/// drawable was asked to reach the glass, or 0 for as soon as possible; nil without presenting
+	/// when nothing changed, which leaves the previous image on screen.
+	func draw(to drawable: CAMetalDrawable, whenShown: @escaping () -> Void) -> UInt64? {
 		lock.lock()
 		recordTrips()
 		let frames: [ReceivedFrame]
@@ -315,13 +316,13 @@ final class FrameRenderer: FrameSink {
 		      let commandBuffer = commandQueue.makeCommandBuffer()
 		else {
 			release(frames.map(\.slot))
-			return false
+			return nil
 		}
 
 		let current = frames.filter { surface.owns($0.slot) }
 		guard surface.hasContent || !current.isEmpty else {
 			release(frames.map(\.slot))
-			return false
+			return nil
 		}
 		surface.hasContent = true
 		let receivedTimes = current.map(\.receivedTime)
@@ -392,7 +393,7 @@ final class FrameRenderer: FrameSink {
 			self?.release(slots)
 		}
 		commandBuffer.commit()
-		return true
+		return pacedGlass ?? 0
 	}
 
 	/// Applies every completed frame to the display texture without presenting anything.
