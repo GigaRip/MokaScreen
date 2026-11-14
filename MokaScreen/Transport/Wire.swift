@@ -21,7 +21,9 @@ import Foundation
 /// may send `settings` between frames to change the other's Show Statistics and
 /// Smooth Motion settings; the sender sends its own right after the handshake.
 /// While showing, the receiver sends a `displayReport` and a `paceReport` once a
-/// second with its share of the delay and how evenly frames reach the glass. A side ignores a
+/// second with its share of the delay and how evenly frames reach the glass. For Develop ›
+/// Record Frame Timing the sender sends a `timingRequest`, and for its duration the receiver
+/// answers every frame it draws with a `frameTiming`. A side ignores a
 /// header type it does not know, outside a frame, so a later message type that
 /// carries no payload does not need a version change.
 enum Wire {
@@ -51,6 +53,8 @@ enum MessageType: UInt32 {
 	case settings = 6
 	case displayReport = 7
 	case paceReport = 8
+	case timingRequest = 9
+	case frameTiming = 10
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -244,6 +248,65 @@ struct SettingsMessage: Equatable {
 		try WireHeader.expect(.settings, p)
 		let flags = WireHeader.load32(p, 4)
 		return SettingsMessage(settings: SharedSettings(showsStatistics: flags & 1 != 0, smoothMotion: flags & 2 != 0, fixedRefreshRate: flags & 4 != 0))
+	}
+}
+
+/// Sender → receiver: report how each frame reaches the glass, with one ``FrameTimingMessage``
+/// per frame, for the next `durationMillis`.
+struct TimingRequestMessage: Equatable {
+	var durationMillis: UInt32
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.timingRequest.rawValue, p, 0)
+		WireHeader.store(durationMillis, p, 4)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> TimingRequestMessage {
+		try WireHeader.expect(.timingRequest, p)
+		return TimingRequestMessage(durationMillis: WireHeader.load32(p, 4))
+	}
+}
+
+/// Receiver → sender, while a timing request lasts: when one frame arrived, was drawn, and
+/// reached the glass, on the display Mac's clock.
+///
+/// Layout: flags at 4 (bits 0–15 `drawnTogether`, bit 31 `paced`), `frameID` at 8, `drawTime`
+/// at 16, `receivedBeforeDrawMicros` at 24, `glassAfterDrawMicros` at 28.
+struct FrameTimingMessage: Equatable, BitwiseCopyable {
+	var frameID: UInt64
+	/// Host nanoseconds on the display Mac when the draw that applied this frame was encoded.
+	var drawTime: UInt64
+	/// Microseconds from the frame's last byte arriving to that draw.
+	var receivedBeforeDrawMicros: UInt32
+	/// Microseconds from that draw to the glass; −1 when the drawable was never shown.
+	var glassAfterDrawMicros: Int32
+	/// Frames applied by the same draw. Above 1, the earlier ones never reached the glass alone.
+	var drawnTogether: UInt16
+	/// Whether Smooth Motion held the draw for a paced glass time.
+	var paced: Bool
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.frameTiming.rawValue, p, 0)
+		WireHeader.store(UInt32(drawnTogether) | (paced ? 1 << 31 : 0), p, 4)
+		WireHeader.store(frameID, p, 8)
+		WireHeader.store(drawTime, p, 16)
+		WireHeader.store(receivedBeforeDrawMicros, p, 24)
+		WireHeader.store(UInt32(bitPattern: glassAfterDrawMicros), p, 28)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> FrameTimingMessage {
+		try WireHeader.expect(.frameTiming, p)
+		let flags = WireHeader.load32(p, 4)
+		return FrameTimingMessage(
+			frameID: WireHeader.load64(p, 8),
+			drawTime: WireHeader.load64(p, 16),
+			receivedBeforeDrawMicros: WireHeader.load32(p, 24),
+			glassAfterDrawMicros: Int32(bitPattern: WireHeader.load32(p, 28)),
+			drawnTogether: UInt16(truncatingIfNeeded: flags),
+			paced: flags & (1 << 31) != 0
+		)
 	}
 }
 

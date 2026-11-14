@@ -67,6 +67,7 @@ final class FrameReceiver {
 	private let stats: ReceiverStats
 	private let onHello: (HelloMessage) -> Void
 	private let onSettings: (SharedSettings) -> Void
+	private let onTimingRequest: (TimingRequestMessage) -> Void
 	private let onClose: (Error) -> Void
 	private let ackQueue = DispatchQueue(label: "com.gigarip.mokascreen.ack", qos: .userInteractive)
 	private let ackLock = NSLock()
@@ -77,13 +78,15 @@ final class FrameReceiver {
 	/// - Parameters:
 	///   - onHello: Called on the reader thread once the sender is accepted.
 	///   - onSettings: Called on the reader thread when the sender changes a shared setting.
+	///   - onTimingRequest: Called on the reader thread when the sender asks for per-frame timing.
 	///   - onClose: Called once on the reader thread when the stream ends or fails.
-	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, onHello: @escaping (HelloMessage) -> Void, onSettings: @escaping (SharedSettings) -> Void, onClose: @escaping (Error) -> Void) {
+	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, onHello: @escaping (HelloMessage) -> Void, onSettings: @escaping (SharedSettings) -> Void, onTimingRequest: @escaping (TimingRequestMessage) -> Void = { _ in }, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.sink = sink
 		self.stats = stats
 		self.onHello = onHello
 		self.onSettings = onSettings
+		self.onTimingRequest = onTimingRequest
 		self.onClose = onClose
 	}
 
@@ -141,6 +144,14 @@ final class FrameReceiver {
 		}
 	}
 
+	/// Sends one frame's timing to the sender. Thread-safe; written on the queue that writes
+	/// `presented`.
+	func sendFrameTiming(_ timing: FrameTimingMessage) {
+		ackQueue.async { [self] in
+			try? stream.writeHeader { timing.encode(into: $0) }
+		}
+	}
+
 	/// Sends this second's statistics to the sender. Thread-safe; written on the queue that writes
 	/// `presented`.
 	func sendReport(_ snapshot: ReceiverSnapshot) {
@@ -168,6 +179,9 @@ final class FrameReceiver {
 				begin = message
 			case .settings(let message):
 				onSettings(message.settings)
+				continue
+			case .timingRequest(let message):
+				onTimingRequest(message)
 				continue
 			case .unknown:
 				continue
@@ -199,14 +213,16 @@ final class FrameReceiver {
 private enum SenderMessage {
 	case frameBegin(FrameBeginMessage)
 	case settings(SettingsMessage)
+	case timingRequest(TimingRequestMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> SenderMessage {
 		switch MessageType(rawValue: WireHeader.type(p)) {
 		case .frameBegin: .frameBegin(try FrameBeginMessage.decode(p))
 		case .settings: .settings(try SettingsMessage.decode(p))
+		case .timingRequest: .timingRequest(try TimingRequestMessage.decode(p))
 		// A rect outside a frame is a protocol error, not an unknown message.
-		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport: throw WireError.unexpectedMessage(WireHeader.type(p))
+		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport, .frameTiming: throw WireError.unexpectedMessage(WireHeader.type(p))
 		case nil: .unknown
 		}
 	}

@@ -25,6 +25,20 @@ struct WireTests {
 		#expect(try roundTrip(message.encode, SettingsMessage.decode) == message)
 	}
 
+	@Test func timingRequestRoundTrips() throws {
+		let message = TimingRequestMessage(durationMillis: 10_000)
+		#expect(try roundTrip(message.encode, TimingRequestMessage.decode) == message)
+	}
+
+	@Test func frameTimingRoundTripsIncludingAFrameNeverShown() throws {
+		for message in [
+			FrameTimingMessage(frameID: 9_000_000_001, drawTime: 123_456_789_012, receivedBeforeDrawMicros: 410, glassAfterDrawMicros: 7_900, drawnTogether: 2, paced: true),
+			FrameTimingMessage(frameID: 3, drawTime: 1, receivedBeforeDrawMicros: 0, glassAfterDrawMicros: -1, drawnTogether: 1, paced: false),
+		] {
+			#expect(try roundTrip(message.encode, FrameTimingMessage.decode) == message)
+		}
+	}
+
 	@Test func paceReportRoundTrips() throws {
 		let report = PaceReportMessage(unevenFrames: 7, comparedFrames: 109, pacingMicros: 4_250, intervalMillis: 1002)
 		#expect(try roundTrip(report.encode, PaceReportMessage.decode) == report)

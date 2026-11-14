@@ -203,6 +203,8 @@ final class ReceiverSession {
 			}
 		}, onSettings: { [weak self] settings in
 			Task { @MainActor in self?.settingsSync.receive(settings) }
+		}, onTimingRequest: { [weak renderer] request in
+			renderer?.recordTiming(for: Double(request.durationMillis) / 1000)
 		}, onClose: { [weak self] error in
 			Log.transport.info("Sender disconnected: \(String(describing: error), privacy: .public)")
 			Task { @MainActor in
@@ -214,6 +216,9 @@ final class ReceiverSession {
 		renderer.smoothMotion = SmoothMotionPreference.isOn
 		renderer.onPresented = { [weak receiver] frameID, glassTime in
 			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)
+		}
+		renderer.onFrameTiming = { [weak receiver] timing in
+			receiver?.sendFrameTiming(timing)
 		}
 		self.connection = connection
 		receiver.start()

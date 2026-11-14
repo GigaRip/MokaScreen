@@ -35,6 +35,14 @@ final class SenderSession {
 	private(set) var stats = SenderSnapshot()
 	private(set) var lastError: String?
 	private(set) var recordingURL: URL?
+	/// True while Develop › Record Frame Timing is recording.
+	private(set) var isRecordingTiming = false
+
+	/// Whether Develop › Record Frame Timing can start: connected and not already recording.
+	var canRecordTiming: Bool {
+		guard case .connected = status else { return false }
+		return !isRecordingTiming
+	}
 
 	/// Receiver to prefer when several are visible; remembered across launches.
 	var preferredReceiver: String? {
@@ -388,6 +396,29 @@ final class SenderSession {
 		throw lastError
 	}
 
+	/// Records how every frame travels from capture to the display Mac's glass for `seconds`,
+	/// then writes one CSV row per capture to `~/Library/Logs/MokaScreen` and shows it in Finder.
+	func recordFrameTiming(seconds: Double = 10) {
+		guard canRecordTiming, let sender = link.currentSender() else { return }
+		isRecordingTiming = true
+		sender.recordFrameTiming(seconds: seconds)
+		Log.transport.info("Recording frame timing for \(seconds, privacy: .public) s")
+		Task { [weak self] in
+			// The display Mac reports each frame once it reaches the glass, a refresh or two after
+			// it is drawn, so the last reports trail the end of its recording.
+			try? await Task.sleep(for: .seconds(seconds + 1))
+			guard let self else { return }
+			self.isRecordingTiming = false
+			do {
+				let url = try sender.timing.write()
+				Log.transport.info("Wrote frame timing to \(url.path, privacy: .public)")
+				NSWorkspace.shared.activateFileViewerSelecting([url])
+			} catch {
+				self.lastError = "Cannot write frame timing: \(error.localizedDescription)"
+			}
+		}
+	}
+
 	private func startStatsTimer() {
 		statsTimer?.invalidate()
 		statsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -454,6 +485,11 @@ private final class CaptureLink: @unchecked Sendable {
 	func reset() {
 		setSender(nil)
 		lock.withLock { latest = nil }
+	}
+
+	/// The sender for the current connection, if any.
+	func currentSender() -> FrameSender? {
+		lock.withLock { sender }
 	}
 
 	/// Forwards a settings change to the receiver, if connected.

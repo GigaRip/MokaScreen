@@ -128,6 +128,23 @@ private final class SettingsLog: @unchecked Sendable {
 	}
 }
 
+/// Timing request durations one side received.
+private final class TimingRequestLog: @unchecked Sendable {
+	private let arrived = DispatchSemaphore(value: 0)
+	private let lock = NSLock()
+	private var values: [UInt32] = []
+
+	func record(_ durationMillis: UInt32) {
+		lock.withLock { values.append(durationMillis) }
+		arrived.signal()
+	}
+
+	func next() -> UInt32? {
+		guard arrived.wait(timeout: .now() + 5) == .success else { return nil }
+		return lock.withLock { values.removeFirst() }
+	}
+}
+
 /// A connected sender/receiver pair over loopback TCP.
 private struct Loopback {
 	let sink = MemorySink()
@@ -138,6 +155,8 @@ private struct Loopback {
 	/// Show Statistics values each side heard from the other.
 	let senderHeard = SettingsLog()
 	let receiverHeard = SettingsLog()
+	/// Durations of the timing requests the receiver heard, in milliseconds.
+	let timingRequests = TimingRequestLog()
 
 	init(width: Int, height: Int, settings: SharedSettings = SharedSettings(showsStatistics: false, smoothMotion: false)) throws {
 		let port = UInt16.random(in: 48_000...58_000)
@@ -152,7 +171,7 @@ private struct Loopback {
 
 		let receiverStats = ReceiverStats()
 		let hello = DispatchSemaphore(value: 0)
-		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, onHello: { _ in hello.signal() }, onSettings: { [receiverHeard] in receiverHeard.record($0) }, onClose: { _ in })
+		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, onHello: { _ in hello.signal() }, onSettings: { [receiverHeard] in receiverHeard.record($0) }, onTimingRequest: { [timingRequests] in timingRequests.record($0.durationMillis) }, onClose: { _ in })
 		receiver.start()
 		try client.writeHeader { HelloMessage(width: UInt32(width), height: UInt32(height)).encode(into: $0) }
 		_ = try client.readHeader(HelloAckMessage.decode)
@@ -243,6 +262,29 @@ struct PipelineTests {
 		}
 		#expect(stats.displayDelay == 15.5)
 		#expect(stats.displayDelayP99 == 19)
+	}
+
+	@Test func frameTimingRequestAndReportsCrossTheConnection() throws {
+		let (width, height) = (64, 48)
+		let loopback = try Loopback(width: width, height: height)
+		defer { loopback.close() }
+		let fill: (Int, Int) -> UInt32 = { x, y in UInt32(truncatingIfNeeded: x ^ y) | 0xFF00_0000 }
+
+		loopback.sender.recordFrameTiming(seconds: 2)
+		#expect(loopback.timingRequests.next() == 2000)
+		loopback.sender.submit(try makeFrame(width: width, height: height, fill: fill, dirty: []))
+		#expect(loopback.sink.waitForFrame())
+		let report = FrameTimingMessage(frameID: 1, drawTime: HostClock.now, receivedBeforeDrawMicros: 300, glassAfterDrawMicros: 8000, drawnTogether: 1, paced: false)
+		loopback.receiver.sendFrameTiming(report)
+
+		var displays: [FrameTimingMessage] = []
+		for _ in 0..<100 where displays.isEmpty {
+			Thread.sleep(forTimeInterval: 0.02)
+			displays = loopback.sender.timing.displays.snapshot()
+		}
+		#expect(displays == [report])
+		#expect(loopback.sender.timing.sends.snapshot().map(\.frameID) == [1])
+		#expect(loopback.sender.timing.captures.snapshot().count == 1)
 	}
 
 	@Test func fullFrameThroughputOverLoopback() throws {

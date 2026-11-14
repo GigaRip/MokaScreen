@@ -47,6 +47,8 @@ final class FrameRenderer: FrameSink {
 	private var needsRedraw = true
 	private var shuttingDown = false
 	private var pacesFrames = false
+	/// Host nanoseconds until which each draw reports its frames through `onFrameTiming`.
+	private var timingUntil: UInt64 = 0
 	/// Render thread only.
 	private var pacer = FramePacer()
 
@@ -63,6 +65,15 @@ final class FrameRenderer: FrameSink {
 	/// Called from a Metal thread with the newest frame ID and its glass time, in host
 	/// nanoseconds, each time a drawable is presented.
 	var onPresented: ((UInt64, UInt64) -> Void)?
+
+	/// Called from a Metal thread once per frame drawn while timing is being recorded. Set before
+	/// the first frame arrives.
+	var onFrameTiming: ((FrameTimingMessage) -> Void)?
+
+	/// Reports every frame drawn for the next `seconds` through ``onFrameTiming``. Thread-safe.
+	func recordTiming(for seconds: Double) {
+		lock.withLock { timingUntil = HostClock.now &+ UInt64(seconds * 1e9) }
+	}
 
 	/// Called from the reader thread whenever there is something new to draw.
 	var onWork: (() -> Void)? {
@@ -233,6 +244,7 @@ final class FrameRenderer: FrameSink {
 		needsRedraw = false
 		let surface = surface
 		let pacesFrames = pacesFrames
+		let recordsTiming = timingUntil > HostClock.now
 		lock.unlock()
 
 		guard let surface, !frames.isEmpty || redraw,
@@ -275,9 +287,31 @@ final class FrameRenderer: FrameSink {
 		let stats = stats
 		let onPresented = onPresented
 		let refreshNanos = UInt64(refreshInterval * 1e9)
+		// Smooth Motion holds a frame until its paced glass time; one already due goes at once.
+		var pacedGlass: UInt64?
+		if pacesFrames, let newest, let glass = pacer.glassTime(captureTime: newest.captureTime), glass > HostClock.now &+ 1_000_000 {
+			pacedGlass = glass
+		}
+		var timing: [FrameTimingMessage] = []
+		if recordsTiming, onFrameTiming != nil, !current.isEmpty {
+			let drawTime = HostClock.now
+			timing = current.map {
+				FrameTimingMessage(frameID: $0.frameID, drawTime: drawTime, receivedBeforeDrawMicros: UInt32(clamping: (drawTime &- $0.receivedTime) / 1000), glassAfterDrawMicros: -1, drawnTogether: UInt16(clamping: current.count), paced: pacedGlass != nil)
+			}
+		}
+		let onFrameTiming = onFrameTiming
 		drawable.addPresentedHandler { drawable in
 			defer { whenShown() }
 			let presented = drawable.presentedTime
+			if !timing.isEmpty, let onFrameTiming {
+				let presentedNanos = presented > 0 ? UInt64(presented * 1e9) : 0
+				for var frame in timing {
+					if presentedNanos > 0 {
+						frame.glassAfterDrawMicros = Int32(clamping: (Int64(bitPattern: presentedNanos) - Int64(bitPattern: frame.drawTime)) / 1000)
+					}
+					onFrameTiming(frame)
+				}
+			}
 			guard presented > 0, let newest else { return }
 			let presentedNanos = UInt64(presented * 1e9)
 			for received in receivedTimes {
@@ -286,8 +320,7 @@ final class FrameRenderer: FrameSink {
 			stats.recordGlass(captureTime: newest.captureTime, glassTime: presentedNanos, refreshNanos: refreshNanos)
 			onPresented?(newest.frameID, presentedNanos)
 		}
-		// Smooth Motion holds a frame until its paced glass time; one already due goes at once.
-		if pacesFrames, let newest, let glass = pacer.glassTime(captureTime: newest.captureTime), glass > HostClock.now &+ 1_000_000 {
+		if let glass = pacedGlass {
 			commandBuffer.present(drawable, atTime: Double(glass) / 1e9)
 		} else {
 			commandBuffer.present(drawable)

@@ -31,6 +31,8 @@ final class FrameSender {
 	private var pending: CapturedFrame?
 	/// A settings change waiting to go out ahead of the next frame.
 	private var pendingSettings: SharedSettings?
+	/// A request for per-frame timing waiting to go out ahead of the next frame.
+	private var pendingTimingRequest: TimingRequestMessage?
 	private var dirty: DirtyRegion
 	private var running = true
 	private var nextFrameID: UInt64 = 1
@@ -38,6 +40,8 @@ final class FrameSender {
 	private let onSettings: (SharedSettings) -> Void
 	/// Capture time of each recent frame, so `presented` acknowledgements yield latency.
 	private let inflight = InflightFrames()
+	/// Develop › Record Frame Timing; idle unless a recording is running.
+	let timing = FrameTimingRecorder()
 
 	/// Starts the send and acknowledgement threads on a stream that has completed the handshake.
 	/// - Parameters:
@@ -69,6 +73,7 @@ final class FrameSender {
 
 	/// Hands over the newest capture. Called on the capture queue; never blocks on the network.
 	func submit(_ frame: CapturedFrame) {
+		timing.record(FrameTimingRecorder.Capture(captureTime: frame.captureTime, submitTime: HostClock.now, dirtyRects: Int32(clamping: frame.dirtyRects.count)))
 		condition.lock()
 		for rect in frame.dirtyRects {
 			dirty.insert(rect)
@@ -86,6 +91,16 @@ final class FrameSender {
 	func sendSettings(_ settings: SharedSettings) {
 		condition.lock()
 		pendingSettings = settings
+		condition.signal()
+		condition.unlock()
+	}
+
+	/// Starts recording per-frame timing on both Macs for `seconds`. Read the result with
+	/// ``FrameTimingRecorder/write()`` on ``timing`` once the time is up.
+	func recordFrameTiming(seconds: Double) {
+		timing.start()
+		condition.lock()
+		pendingTimingRequest = TimingRequestMessage(durationMillis: UInt32(seconds * 1000))
 		condition.signal()
 		condition.unlock()
 	}
@@ -110,8 +125,19 @@ final class FrameSender {
 
 		while true {
 			condition.lock()
-			while running && pendingSettings == nil && (pending == nil || dirty.isEmpty) {
+			while running && pendingSettings == nil && pendingTimingRequest == nil && (pending == nil || dirty.isEmpty) {
 				condition.wait()
+			}
+			if running, let request = pendingTimingRequest {
+				pendingTimingRequest = nil
+				condition.unlock()
+				do {
+					try stream.writeHeader { request.encode(into: $0) }
+				} catch {
+					fail(error)
+					return
+				}
+				continue
 			}
 			if running, let settings = pendingSettings {
 				pendingSettings = nil
@@ -195,8 +221,11 @@ final class FrameSender {
 		}
 
 		inflight.record(frameID: frameID, captureTime: frame.captureTime)
+		let start = HostClock.now
 		try stream.write(UnsafeBufferPointer(rebasing: chunks[0..<count]))
-		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: Double(payloadBytes) / Double(width * height * 4))
+		let coverage = Double(payloadBytes) / Double(width * height * 4)
+		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage)
+		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: HostClock.now, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage)))
 	}
 
 	private func ackLoop() {
@@ -215,6 +244,8 @@ final class FrameSender {
 					stats.recordDisplayReport(report)
 				case .paceReport(let report):
 					stats.recordPaceReport(report)
+				case .frameTiming(let report):
+					timing.record(report)
 				case .unknown:
 					break
 				}
@@ -244,6 +275,7 @@ private enum ReceiverMessage {
 	case settings(SettingsMessage)
 	case displayReport(DisplayReportMessage)
 	case paceReport(PaceReportMessage)
+	case frameTiming(FrameTimingMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
@@ -252,6 +284,7 @@ private enum ReceiverMessage {
 		case .settings: .settings(try SettingsMessage.decode(p))
 		case .displayReport: .displayReport(try DisplayReportMessage.decode(p))
 		case .paceReport: .paceReport(try PaceReportMessage.decode(p))
+		case .frameTiming: .frameTiming(try FrameTimingMessage.decode(p))
 		default: .unknown
 		}
 	}

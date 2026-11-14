@@ -51,6 +51,9 @@ struct MokaScreenApp: App {
 					.keyboardShortcut("r", modifiers: [.command, .option])
 				Button("Show Latency Clock") { LatencyClock.toggle() }
 					.keyboardShortcut("l", modifiers: [.command, .option])
+				Button(model.sender.isRecordingTiming ? "Recording Frame Timing…" : "Record Frame Timing") { model.sender.recordFrameTiming() }
+					.keyboardShortcut("t", modifiers: [.command, .option])
+					.disabled(!model.sender.canRecordTiming)
 				Divider()
 				Button("Open Statistics Folder") {
 					let url = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Logs/MokaScreen")
