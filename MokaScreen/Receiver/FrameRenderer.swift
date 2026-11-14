@@ -47,6 +47,8 @@ final class FrameRenderer: FrameSink {
 	private var surface: Surface?
 	private var pending: [ReceivedFrame] = []
 	private var needsRedraw = true
+	/// A redraw of the unchanged picture asked for by ``keepAlive()``, left out of the statistics.
+	private var needsKeepAlive = false
 	private var shuttingDown = false
 	private var pacesFrames = false
 	private var pacingFloorNanos: Int64 = 0
@@ -253,10 +255,16 @@ final class FrameRenderer: FrameSink {
 		lock.lock()
 		defer { lock.unlock() }
 		recordTrips()
-		if needsRedraw { return 0 }
+		if needsRedraw || needsKeepAlive { return 0 }
 		guard let oldest = pending.first else { return nil }
 		guard pacesFrames else { return 0 }
 		return drawTime(of: oldest)
+	}
+
+	/// Asks for the unchanged picture to be presented again. See
+	/// ``PresentationDriver/keepAliveInterval``. Render thread only.
+	func keepAlive() {
+		lock.withLock { needsKeepAlive = true }
 	}
 
 	/// Records the trip of every frame that has arrived since the last call, and applies the
@@ -305,8 +313,10 @@ final class FrameRenderer: FrameSink {
 			frames = pending
 			pending.removeAll(keepingCapacity: true)
 		}
-		let redraw = needsRedraw
+		let keepAlive = needsKeepAlive && frames.isEmpty && !needsRedraw
+		let redraw = needsRedraw || needsKeepAlive
 		needsRedraw = false
+		needsKeepAlive = false
 		let surface = surface
 		let pacesFrames = pacesFrames
 		let recordsTiming = timingUntil > HostClock.now
@@ -326,7 +336,10 @@ final class FrameRenderer: FrameSink {
 		}
 		surface.hasContent = true
 		let receivedTimes = current.map(\.receivedTime)
-		stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
+		// A keep-alive is not a frame: counting it would show draws while nothing changes.
+		if !keepAlive {
+			stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
+		}
 		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.effectiveDelay) / 1e6 : 0)
 		encodeBlit(current, to: surface, in: commandBuffer)
 

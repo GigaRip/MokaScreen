@@ -76,14 +76,27 @@ final class MetalLayerView: NSView {
 final class PresentationDriver {
 	static let maxInFlight = 2
 	static let maxInFlightPaced = 3
-	/// How long after its glass time a drawable may go unreported before it stops counting as in
-	/// flight. After the picture has been still for about a second, macOS 27.2 never calls the
-	/// presented handler for the first one or two drawables presented, though later ones report
-	/// normally (measured 2026-11-14 on a ProMotion MacBook Pro whose display link kept ticking at
-	/// 120 Hz throughout). Waiting a flat 100 ms for those reports stalled drawing for up to that
-	/// long whenever motion resumed. Reported drawables arrive within about one refresh of their
-	/// glass time, so two refreshes never cuts one short.
+	/// How long after it was drawn a drawable presented at once may go unreported before it stops
+	/// counting as in flight. After the picture has been still for about a second, macOS 27.2 never
+	/// calls the presented handler for the first one or two drawables presented, though later ones
+	/// report normally (measured 2026-11-14 on a ProMotion MacBook Pro whose display link kept
+	/// ticking at 120 Hz throughout). Waiting a flat 100 ms for those reports stalled drawing for
+	/// up to that long whenever motion resumed. A drawable presented at once reaches the glass
+	/// within about two refreshes.
 	static let reportGraceRefreshes = 2.0
+	/// How long the picture may stay unchanged before the unchanged image is presented again, and
+	/// how often while it stays so. On the same ProMotion MacBook Pro, presenting the unchanged
+	/// image every 250 ms during stills of 1–2 s left no presented report missing afterwards,
+	/// against 16 lost over 9 stills without it; the keep-alive presents themselves always
+	/// reported. Four full-screen redraws a second while nothing changes cost a fraction of a
+	/// millisecond of GPU time each.
+	static let keepAliveInterval: TimeInterval = 0.25
+	/// The same for a drawable Smooth Motion presented at a chosen time, counted from that time.
+	/// Its report arrives about a millisecond after it, so one refresh never cuts one short. With
+	/// two, the drawables whose reports were lost kept the next ones waiting: a recording on
+	/// 2026-11-14 showed frames reaching the glass 1.5 refreshes late for 90 ms after a still
+	/// moment before they settled.
+	static let pacedReportGraceRefreshes = 1.0
 
 	private let layer: CAMetalLayer
 	private let renderer: FrameRenderer
@@ -134,23 +147,30 @@ final class PresentationDriver {
 		// When to look again without a wake-up: nil to sleep until a frame arrives, or the host time
 		// a waiting frame becomes due.
 		var recheck: UInt64?
+		// Set when nothing has arrived for ``keepAliveInterval``.
+		var keepAliveDue = false
 		while true {
 			if let recheck {
 				let now = HostClock.now
 				if recheck > now {
 					_ = wake.wait(timeout: .now() + .nanoseconds(Int(recheck - now)))
 				}
-			} else {
-				wake.wait()
+			} else if wake.wait(timeout: .now() + Self.keepAliveInterval) == .timedOut {
+				keepAliveDue = true
 			}
 			let (isStopped, isPaused) = condition.withLock { (stopped, paused) }
 			if isStopped { return }
 			if isPaused {
 				recheck = nil
+				keepAliveDue = false
 				renderer.absorb()
 				continue
 			}
 			guard waitForRoom() else { return }
+			if keepAliveDue {
+				keepAliveDue = false
+				renderer.keepAlive()
+			}
 			guard let due = renderer.nextDrawTime() else {
 				recheck = nil
 				continue
@@ -162,7 +182,9 @@ final class PresentationDriver {
 			// More frames may be waiting behind this one; look again straight after drawing.
 			recheck = 0
 			guard let drawable = layer.nextDrawable() else { continue }
-			let grace = UInt64(renderer.refreshInterval * Self.reportGraceRefreshes * 1e9)
+			let refresh = renderer.refreshInterval * 1e9
+			let grace = UInt64(refresh * Self.reportGraceRefreshes)
+			let pacedGrace = UInt64(refresh * Self.pacedReportGraceRefreshes)
 			// Counted before drawing, as the presented handler can run before draw returns; the
 			// deadline is set from the glass time once draw has chosen it.
 			let token = condition.withLock {
@@ -171,7 +193,8 @@ final class PresentationDriver {
 				return nextToken
 			}
 			if let glass = renderer.draw(to: drawable, whenShown: { [weak self] in self?.presented(token) }) {
-				condition.withLock { inFlight.setDeadline(max(glass, HostClock.now) &+ grace, for: token) }
+				let deadline = glass > 0 ? glass &+ pacedGrace : HostClock.now &+ grace
+				condition.withLock { inFlight.setDeadline(deadline, for: token) }
 			} else {
 				presented(token)
 			}
