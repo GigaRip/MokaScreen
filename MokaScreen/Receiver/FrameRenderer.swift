@@ -66,6 +66,9 @@ final class FrameRenderer: FrameSink {
 	/// The panel's refresh interval in seconds, for judging whether frames reach the glass evenly.
 	var refreshInterval: Double = 1.0 / 120
 
+	/// The panel's refreshes, so Smooth Motion presents on one. Set before the first frame arrives.
+	var displayTicks: DisplayTicks?
+
 	/// Called from a Metal thread with the newest frame ID and its glass time, in host
 	/// nanoseconds, each time a drawable is presented.
 	var onPresented: ((UInt64, UInt64) -> Void)?
@@ -259,10 +262,19 @@ final class FrameRenderer: FrameSink {
 	/// When a waiting frame should be drawn under Smooth Motion: a refresh before its glass time,
 	/// and never more than the pacer's cap after it arrived, in case the clock estimate is off.
 	private func drawTime(of frame: ReceivedFrame) -> UInt64 {
-		guard let glass = pacer.glassTime(captureTime: frame.captureTime) else { return 0 }
+		guard let glass = presentTime(of: frame) else { return 0 }
 		let lead = UInt64(refreshInterval * 1e9)
 		let latest = frame.receivedTime &+ UInt64(FramePacer.maximumDelayNanos)
 		return min(glass > lead ? glass - lead : 0, latest)
+	}
+
+	/// The time to pass to `present(_:atTime:)` for a frame under Smooth Motion: its paced glass
+	/// time moved forward to the panel's next refresh, less a millisecond so the panel shows it on
+	/// that refresh rather than the half-step after. Without known refreshes, the paced glass time.
+	private func presentTime(of frame: ReceivedFrame) -> UInt64? {
+		guard let glass = pacer.glassTime(captureTime: frame.captureTime) else { return nil }
+		guard let tick = displayTicks?.tick(atOrAfter: glass) else { return glass }
+		return tick &- 1_000_000
 	}
 
 	/// Applies every frame that is due (see ``nextDrawTime()``) and draws the result, calling
@@ -328,7 +340,7 @@ final class FrameRenderer: FrameSink {
 		let refreshNanos = UInt64(refreshInterval * 1e9)
 		// Smooth Motion holds a frame until its paced glass time; one already due goes at once.
 		var pacedGlass: UInt64?
-		if pacesFrames, let newest, let glass = pacer.glassTime(captureTime: newest.captureTime), glass > HostClock.now &+ 1_000_000 {
+		if pacesFrames, let newest, let glass = presentTime(of: newest), glass > HostClock.now &+ 1_000_000 {
 			pacedGlass = glass
 		}
 		var timing: [FrameTimingMessage] = []

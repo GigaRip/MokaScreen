@@ -51,6 +51,30 @@ import Testing
 	}
 }
 
+@Suite struct DisplayTicksTests {
+	private let interval: UInt64 = 8_333_333
+
+	@Test func movesATimeToTheNextRefresh() {
+		let ticks = DisplayTicks()
+		ticks.record(timestamp: 10, duration: 1.0 / 120)
+		let last: UInt64 = 10_000_000_000
+		let now = last + 2_000_000
+		// Between refreshes: the next one.
+		#expect(ticks.tick(atOrAfter: last + 3 * interval + 4_000_000, now: now) == last + 4 * interval)
+		// On a refresh: that one.
+		#expect(ticks.tick(atOrAfter: last + 2 * interval, now: now) == last + 2 * interval)
+		// Already past: the last refresh, so the frame is presented at once.
+		#expect(ticks.tick(atOrAfter: last - 5_000_000, now: now) == last)
+	}
+
+	@Test func knowsNothingWithoutRecentRefreshes() {
+		let ticks = DisplayTicks()
+		#expect(ticks.tick(atOrAfter: 1_000, now: 2_000) == nil)
+		ticks.record(timestamp: 10, duration: 1.0 / 120)
+		#expect(ticks.tick(atOrAfter: 12_000_000_000, now: 11_500_000_000) == nil)
+	}
+}
+
 private final class Delivered: @unchecked Sendable {
 	var count = 0
 }

@@ -72,6 +72,8 @@ final class ReceiverSession {
 		var view: MetalLayerView?
 		var driver: PresentationDriver?
 		var refreshRate: RefreshRateRequest?
+		/// The panel's refreshes, noted by ``refreshRate`` and used by Smooth Motion.
+		let ticks = DisplayTicks()
 		var activity: NSObjectProtocol?
 		var activationObservers: [NSObjectProtocol] = []
 
@@ -217,6 +219,7 @@ final class ReceiverSession {
 		renderer.onPresented = { [weak receiver] frameID, glassTime in
 			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)
 		}
+		renderer.displayTicks = connection.ticks
 		renderer.onFrameTiming = { [weak receiver] timing in
 			receiver?.sendFrameTiming(timing)
 		}
@@ -313,7 +316,7 @@ final class ReceiverSession {
 		NSApp.activate()
 		connection.renderer.refreshInterval = 1 / Double(max(60, window.screen?.maximumFramesPerSecond ?? 120))
 		if FixedRefreshRatePreference.isOn(in: .standard) {
-			connection.refreshRate = RefreshRateRequest(view: view)
+			connection.refreshRate = RefreshRateRequest(view: view, ticks: connection.ticks)
 		}
 		// A display must not dim or sleep while it is someone else's screen.
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
@@ -325,7 +328,7 @@ final class ReceiverSession {
 	private func updateRefreshRateRequest(fixed: Bool) {
 		guard let connection, case .showing = status, let view = connection.view else { return }
 		if fixed, connection.refreshRate == nil {
-			connection.refreshRate = RefreshRateRequest(view: view)
+			connection.refreshRate = RefreshRateRequest(view: view, ticks: connection.ticks)
 		} else if !fixed, let request = connection.refreshRate {
 			request.invalidate()
 			connection.refreshRate = nil

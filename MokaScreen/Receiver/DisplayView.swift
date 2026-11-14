@@ -10,6 +10,7 @@
 import AppKit
 import Metal
 import QuartzCore
+import Synchronization
 
 /// A view backed by a `CAMetalLayer` whose drawable always matches the view's pixel size.
 final class MetalLayerView: NSView {
@@ -198,11 +199,13 @@ final class PresentationDriver {
 /// ProMotion panel at 60 Hz under a steady 110 fps load: draws fell to 60 a second, frames waited
 /// about 8 ms to be folded in pairs, and each then took a 16.7 ms refresh to reach the glass, for
 /// about 23 ms instead of about 7. A display link's frame-rate range is the rate request macOS
-/// takes from an app; this link's callback does nothing.
+/// takes from an app; its callback only notes when the panel refreshed, in `ticks`.
 final class RefreshRateRequest: NSObject {
 	private var link: CADisplayLink?
+	private let ticks: DisplayTicks?
 
-	init(view: NSView) {
+	init(view: NSView, ticks: DisplayTicks? = nil) {
+		self.ticks = ticks
 		super.init()
 		let link = view.displayLink(target: self, selector: #selector(tick))
 		link.preferredFrameRateRange = CAFrameRateRange(minimum: 120, maximum: 120, preferred: 120)
@@ -210,12 +213,45 @@ final class RefreshRateRequest: NSObject {
 		self.link = link
 	}
 
-	@objc private func tick(_ link: CADisplayLink) {}
+	@objc private func tick(_ link: CADisplayLink) {
+		ticks?.record(timestamp: link.timestamp, duration: link.duration)
+	}
 
 	/// Ends the request. The link retains its target, so this also breaks that cycle.
 	func invalidate() {
 		link?.invalidate()
 		link = nil
+	}
+}
+
+/// When the panel last refreshed and how often, so Smooth Motion can present on a refresh.
+///
+/// A ProMotion panel held at 120 Hz still steps in 4.17 ms (NSScreen.displayUpdateGranularity),
+/// so a frame presented between two refreshes can reach the glass on a half-step. A frame timing
+/// recording on 2026-11-14 showed 23 of 715 paced frames 4.17 ms off their capture spacing.
+/// Written on the main thread by ``RefreshRateRequest``; read on the render thread.
+final class DisplayTicks: Sendable {
+	private let last = Atomic<UInt64>(0)
+	private let interval = Atomic<UInt64>(0)
+	/// Ticks older than this are not trusted, e.g. once Fixed 120 Hz is turned off.
+	static let staleAfterNanos: UInt64 = 1_000_000_000
+
+	/// Notes a refresh at `timestamp`, in host seconds, of a panel refreshing every `duration`.
+	func record(timestamp: CFTimeInterval, duration: CFTimeInterval) {
+		guard timestamp > 0, duration > 0 else { return }
+		interval.store(UInt64(duration * 1e9), ordering: .relaxed)
+		last.store(UInt64(timestamp * 1e9), ordering: .releasing)
+	}
+
+	/// The first refresh at or after `time`, in host nanoseconds; nil while no recent refresh is
+	/// known.
+	func tick(atOrAfter time: UInt64, now: UInt64 = HostClock.now) -> UInt64? {
+		let last = last.load(ordering: .acquiring)
+		let interval = interval.load(ordering: .relaxed)
+		guard last > 0, interval > 0, now &- last < Self.staleAfterNanos || last > now else { return nil }
+		guard time > last else { return last }
+		let steps = (time - last + interval - 1) / interval
+		return last + steps * interval
 	}
 }
 
