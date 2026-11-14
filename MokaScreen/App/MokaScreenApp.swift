@@ -16,6 +16,7 @@ struct MokaScreenApp: App {
 	@State private var model = AppModel()
 	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
 	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = false
+	@AppStorage(SmoothMotionFloorPreference.key) private var smoothMotionFloor = 0
 	@AppStorage(FixedRefreshRatePreference.key) private var fixedRefreshRate = FixedRefreshRatePreference.defaultValue
 
 	/// Drives in-app updates via Sparkle. Held for the app's lifetime so the updater keeps
@@ -47,6 +48,12 @@ struct MokaScreenApp: App {
 					.keyboardShortcut("s", modifiers: [.command, .option])
 				Toggle("Smooth Motion", isOn: $smoothMotion)
 					.keyboardShortcut("m", modifiers: [.command, .option])
+				Picker("Smooth Motion Minimum Delay", selection: $smoothMotionFloor) {
+					ForEach(SmoothMotionFloorPreference.choices, id: \.self) { millis in
+						Text(millis == 0 ? "Adaptive" : "\(millis) ms").tag(millis)
+					}
+				}
+				.disabled(!smoothMotion)
 				Toggle("Fixed 120 Hz", isOn: $fixedRefreshRate)
 					.keyboardShortcut("r", modifiers: [.command, .option])
 				Button("Show Latency Clock") { LatencyClock.toggle() }
@@ -87,6 +94,20 @@ enum SmoothMotionPreference {
 	}
 }
 
+/// The least Smooth Motion holds a frame beyond the quickest recent trip, in milliseconds; 0
+/// leaves the delay to follow how late recent frames were. The first frames of a scroll are the
+/// largest and arrived 11–20 ms later than the quickest frames in frame timing recordings on
+/// 2026-11-14, before the adaptive delay had risen to cover them.
+enum SmoothMotionFloorPreference {
+	static let key = "smoothMotionFloorMillis"
+	static let choices = [0, 10, 20]
+
+	static func millis(in defaults: UserDefaults) -> Int {
+		let value = defaults.integer(forKey: key)
+		return choices.contains(value) ? value : 0
+	}
+}
+
 /// Whether the display Mac holds its screen at 120 Hz while showing. On by default: left to
 /// choose, macOS sometimes ran the display Mac's ProMotion panel at 60 Hz under a steady 110 fps
 /// load (see ``RefreshRateRequest``). Off lets ProMotion vary the rate, for experiments.
@@ -104,6 +125,8 @@ struct SharedSettings: Equatable {
 	var showsStatistics: Bool
 	var smoothMotion: Bool
 	var fixedRefreshRate: Bool = FixedRefreshRatePreference.defaultValue
+	/// See ``SmoothMotionFloorPreference``.
+	var smoothMotionFloorMillis: Int = 0
 
 	/// This Mac's settings, from the standard user defaults.
 	static var current: SharedSettings {
@@ -115,7 +138,8 @@ struct SharedSettings: Equatable {
 		SharedSettings(
 			showsStatistics: defaults.bool(forKey: StatisticsPreference.key),
 			smoothMotion: defaults.bool(forKey: SmoothMotionPreference.key),
-			fixedRefreshRate: FixedRefreshRatePreference.isOn(in: defaults)
+			fixedRefreshRate: FixedRefreshRatePreference.isOn(in: defaults),
+			smoothMotionFloorMillis: SmoothMotionFloorPreference.millis(in: defaults)
 		)
 	}
 
@@ -123,6 +147,7 @@ struct SharedSettings: Equatable {
 		defaults.set(showsStatistics, forKey: StatisticsPreference.key)
 		defaults.set(smoothMotion, forKey: SmoothMotionPreference.key)
 		defaults.set(fixedRefreshRate, forKey: FixedRefreshRatePreference.key)
+		defaults.set(smoothMotionFloorMillis, forKey: SmoothMotionFloorPreference.key)
 	}
 }
 

@@ -25,6 +25,12 @@ struct WireTests {
 		#expect(try roundTrip(message.encode, SettingsMessage.decode) == message)
 	}
 
+	@Test(arguments: [0, 10, 20])
+	func settingsCarrySmoothMotionMinimumDelay(millis: Int) throws {
+		let message = SettingsMessage(settings: SharedSettings(showsStatistics: true, smoothMotion: true, fixedRefreshRate: true, smoothMotionFloorMillis: millis))
+		#expect(try roundTrip(message.encode, SettingsMessage.decode) == message)
+	}
+
 	@Test func timingRequestRoundTrips() throws {
 		let message = TimingRequestMessage(durationMillis: 10_000)
 		#expect(try roundTrip(message.encode, TimingRequestMessage.decode) == message)

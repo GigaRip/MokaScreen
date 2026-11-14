@@ -77,6 +77,23 @@ struct FramePacerTests {
 		#expect(pacer.delay < 1_000_000)
 	}
 
+	@Test func minimumDelayHoldsFramesWhenTheTripIsSteady() throws {
+		var pacer = FramePacer()
+		for n in 0..<60 {
+			let capture = UInt64(n) * Self.refresh
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + 2_000_000)
+		}
+		let capture = 60 * Self.refresh
+		#expect(pacer.delay == FramePacer.minimumDelayNanos)
+		let adaptive = try #require(pacer.glassTime(captureTime: capture))
+		pacer.floorNanos = 20_000_000
+		#expect(pacer.effectiveDelay == 20_000_000)
+		#expect(try #require(pacer.glassTime(captureTime: capture)) == adaptive + 20_000_000 - UInt64(FramePacer.minimumDelayNanos))
+		// The floor never exceeds the cap.
+		pacer.floorNanos = 40_000_000
+		#expect(pacer.effectiveDelay == FramePacer.maximumDelayNanos)
+	}
+
 	@Test func aPauseStartsTheScheduleAfresh() {
 		var pacer = FramePacer()
 		var capture: UInt64 = 0

@@ -59,6 +59,7 @@ final class ReceiverSession {
 			self?.connection?.receiver.sendSettings(settings)
 		}, onChange: { [weak self] settings in
 			self?.connection?.renderer.smoothMotion = settings.smoothMotion
+			self?.connection?.renderer.smoothMotionFloorMillis = settings.smoothMotionFloorMillis
 			self?.updateRefreshRateRequest(fixed: settings.fixedRefreshRate)
 		})
 	}
@@ -216,6 +217,7 @@ final class ReceiverSession {
 		})
 		connection = Connection(receiver: receiver, renderer: renderer)
 		renderer.smoothMotion = SmoothMotionPreference.isOn
+		renderer.smoothMotionFloorMillis = SmoothMotionFloorPreference.millis(in: .standard)
 		renderer.onPresented = { [weak receiver] frameID, glassTime in
 			receiver?.reportPresented(frameID: frameID, glassTime: glassTime)
 		}

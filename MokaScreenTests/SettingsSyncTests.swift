@@ -61,6 +61,15 @@ struct SettingsSyncTests {
 		#expect(pair.displaySent == [smooth])
 	}
 
+	@Test func smoothMotionMinimumDelayTravels() throws {
+		let pair = try Pair()
+		#expect(SharedSettings.load(from: pair.display).smoothMotionFloorMillis == 0)
+		pair.extending.set(20, forKey: SmoothMotionFloorPreference.key)
+		#expect(SharedSettings.load(from: pair.display).smoothMotionFloorMillis == 20)
+		#expect(pair.displayChanges.last?.smoothMotionFloorMillis == 20)
+		#expect(pair.displaySent.isEmpty)
+	}
+
 	@Test func fixedRefreshRateIsOnUntilTurnedOffAndTravels() throws {
 		let pair = try Pair()
 		#expect(SharedSettings.load(from: pair.display).fixedRefreshRate)

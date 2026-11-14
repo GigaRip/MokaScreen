@@ -57,8 +57,16 @@ struct FramePacer {
 	private var settled = false
 	private var scratch: [Int64] = []
 	private(set) var minimumTransit: Int64 = .max
-	/// Nanoseconds added beyond the quickest trip.
+	/// Nanoseconds added beyond the quickest trip, following how late recent frames were.
 	private(set) var delay: Int64 = maximumDelayNanos
+	/// The least delay to schedule with, whatever recent frames needed (Develop › Smooth Motion
+	/// Minimum Delay). Zero leaves the delay adaptive.
+	var floorNanos: Int64 = 0
+
+	/// The delay frames are scheduled with: ``delay``, raised to ``floorNanos``.
+	var effectiveDelay: Int64 {
+		max(delay, min(floorNanos, Self.maximumDelayNanos))
+	}
 
 	init() {
 		received.reserveCapacity(Self.window)
@@ -96,7 +104,7 @@ struct FramePacer {
 	/// reach the glass; nil before any frame has been recorded.
 	func glassTime(captureTime: UInt64) -> UInt64? {
 		guard minimumTransit != .max else { return nil }
-		return captureTime &+ UInt64(bitPattern: minimumTransit &+ delay)
+		return captureTime &+ UInt64(bitPattern: minimumTransit &+ effectiveDelay)
 	}
 
 	/// Forgets the recorded trips, e.g. when the sender's clock may have changed.

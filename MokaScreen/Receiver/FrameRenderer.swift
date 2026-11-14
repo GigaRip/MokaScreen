@@ -49,6 +49,7 @@ final class FrameRenderer: FrameSink {
 	private var needsRedraw = true
 	private var shuttingDown = false
 	private var pacesFrames = false
+	private var pacingFloorNanos: Int64 = 0
 	/// Host nanoseconds until which each draw reports its frames through `onFrameTiming`.
 	private var timingUntil: UInt64 = 0
 	/// Render thread only.
@@ -61,6 +62,13 @@ final class FrameRenderer: FrameSink {
 	var smoothMotion: Bool {
 		get { lock.withLock { pacesFrames } }
 		set { lock.withLock { pacesFrames = newValue } }
+	}
+
+	/// The least delay Smooth Motion schedules with, in milliseconds; 0 for adaptive. Thread-safe;
+	/// takes effect from the next draw.
+	var smoothMotionFloorMillis: Int {
+		get { lock.withLock { Int(pacingFloorNanos / 1_000_000) } }
+		set { lock.withLock { pacingFloorNanos = Int64(max(0, newValue)) * 1_000_000 } }
 	}
 
 	/// The panel's refresh interval in seconds, for judging whether frames reach the glass evenly.
@@ -251,8 +259,10 @@ final class FrameRenderer: FrameSink {
 		return drawTime(of: oldest)
 	}
 
-	/// Records the trip of every frame that has arrived since the last call. Caller holds `lock`.
+	/// Records the trip of every frame that has arrived since the last call, and applies the
+	/// current minimum delay. Caller holds `lock`.
 	private func recordTrips() {
+		pacer.floorNanos = pacingFloorNanos
 		for frame in pending where frame.frameID > pacedThrough {
 			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
 			pacedThrough = frame.frameID
@@ -316,7 +326,7 @@ final class FrameRenderer: FrameSink {
 		surface.hasContent = true
 		let receivedTimes = current.map(\.receivedTime)
 		stats.recordDraw(receivedTimes: receivedTimes, at: HostClock.now)
-		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.delay) / 1e6 : 0)
+		stats.recordPacing(milliseconds: pacesFrames ? Double(pacer.effectiveDelay) / 1e6 : 0)
 		encodeBlit(current, to: surface, in: commandBuffer)
 
 		let pass = MTLRenderPassDescriptor()
