@@ -142,6 +142,7 @@ struct SenderStatsView: View {
 		// its draw is mostly its deliberate hold, so it reads "held" rather than "wait".
 		StatRow("Drawn on the display Mac", stats.displayDrawsPerSecond > 0 ? String(format: "%.0f draws a second  ·  %.1f ms %@", stats.displayDrawsPerSecond, stats.displayWait, stats.displayPacing > 0 ? "held" : "wait") : "—")
 		StatRow("Uneven frames", unevenFrames)
+		StatRow("Clocks", stats.displayClockRoundTrip > 0 ? String(format: "Synchronized  ·  %.2f ms round trip", stats.displayClockRoundTrip) : "Not synchronized")
 		StatRow("Changed area", String(format: "%.1f%% mean  ·  %.1f%% max", stats.meanCoverage * 100, stats.maxCoverage * 100))
 		StatRow("Superseded", "\(stats.supersededFrames) frames")
 	}

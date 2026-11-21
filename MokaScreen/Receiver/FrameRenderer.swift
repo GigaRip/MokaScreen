@@ -81,6 +81,10 @@ final class FrameRenderer: FrameSink {
 	/// The panel's refreshes, so Smooth Motion presents on one. Set before the first frame arrives.
 	var displayTicks: DisplayTicks?
 
+	/// The sender's clock, so Smooth Motion schedules from a frame's capture. Set before the first
+	/// frame arrives.
+	var clock: ClockSync?
+
 	/// Called from a Metal thread with the newest frame ID and its glass time, in host
 	/// nanoseconds, each time a drawable is presented.
 	var onPresented: ((UInt64, UInt64) -> Void)?
@@ -273,6 +277,7 @@ final class FrameRenderer: FrameSink {
 	/// current minimum delay. Caller holds `lock`.
 	private func recordTrips() {
 		pacer.floorNanos = pacingFloorNanos
+		pacer.clockOffset = clock?.offset
 		for frame in pending where frame.frameID > pacedThrough {
 			pacer.record(captureTime: frame.captureTime, receivedTime: frame.receivedTime)
 			pacedThrough = frame.frameID
@@ -292,7 +297,10 @@ final class FrameRenderer: FrameSink {
 	/// time moved forward to the panel's next refresh, less a millisecond so the panel shows it on
 	/// that refresh rather than the half-step after. Without known refreshes, the paced glass time.
 	private func presentTime(of frame: ReceivedFrame) -> UInt64? {
-		guard let glass = pacer.glassTime(captureTime: frame.captureTime) else { return nil }
+		guard let paced = pacer.glassTime(captureTime: frame.captureTime) else { return nil }
+		// Never further ahead than the pacer's cap, whatever the clock estimate says: a drawable
+		// presented for a far-off time is held by macOS until then, and the layer has only three.
+		let glass = min(paced, frame.receivedTime &+ UInt64(FramePacer.maximumDelayNanos))
 		guard let tick = displayTicks?.tick(atOrAfter: glass) else { return glass }
 		return tick &- 1_000_000
 	}

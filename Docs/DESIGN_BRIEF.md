@@ -41,7 +41,7 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 
 **Transport**
 - Single TCP connection over Thunderbolt Bridge (`bridge0`), Nagle off, large socket buffers, behind `ByteStream` so the wire layer can change later.
-- Fixed 32-byte message headers. Besides frames: `presented` acknowledgements carry each frame's glass time so the sender can time capture → glass without a shared clock; `settings` keeps the display and statistics settings the same on both Macs; once-a-second display and pace reports; and, for Develop › Record Frame Timing, a timing request answered by one `frameTiming` report per frame.
+- Fixed 32-byte message headers. Besides frames: `presented` acknowledgements carry each frame's glass time so the sender can time capture → glass without a shared clock; `clockPing`/`clockPong` four times a second give the display Mac the difference between the two host clocks (shortest recent round trip wins, slow exchanges ignored), so Smooth Motion's schedule is anchored to the connection's quickest trip instead of the recent frames' and does not shift when a scroll's large frames fill the window; `settings` keeps the display and statistics settings the same on both Macs; once-a-second display and pace reports; and, for Develop › Record Frame Timing, a timing request answered by one `frameTiming` report per frame.
 
 ## Findings that shaped the design
 

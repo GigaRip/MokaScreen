@@ -23,7 +23,9 @@ import Foundation
 /// While showing, the receiver sends a `displayReport` and a `paceReport` once a
 /// second with its share of the delay and how evenly frames reach the glass. For Develop ›
 /// Record Frame Timing the sender sends a `timingRequest`, and for its duration the receiver
-/// answers every frame it draws with a `frameTiming`. A side ignores a
+/// answers every frame it draws with a `frameTiming`. The receiver sends a `clockPing` four
+/// times a second and the sender answers each with a `clockPong`, from which the receiver
+/// works out the difference between the two Macs' clocks. A side ignores a
 /// header type it does not know, outside a frame, so a later message type that
 /// carries no payload does not need a version change.
 enum Wire {
@@ -55,6 +57,8 @@ enum MessageType: UInt32 {
 	case paceReport = 8
 	case timingRequest = 9
 	case frameTiming = 10
+	case clockPing = 11
+	case clockPong = 12
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -333,12 +337,16 @@ struct PaceReportMessage: Equatable {
 	/// Smooth Motion's current delay, in microseconds; zero while it is off.
 	var pacingMicros: UInt32
 	var intervalMillis: UInt32
+	/// The round trip of the ping the clock offset came from, in microseconds; zero while the
+	/// clocks are not synchronized.
+	var clockRoundTripMicros: UInt32
 
-	init(unevenFrames: UInt32, comparedFrames: UInt32, pacingMicros: UInt32, intervalMillis: UInt32) {
+	init(unevenFrames: UInt32, comparedFrames: UInt32, pacingMicros: UInt32, intervalMillis: UInt32, clockRoundTripMicros: UInt32 = 0) {
 		self.unevenFrames = unevenFrames
 		self.comparedFrames = comparedFrames
 		self.pacingMicros = pacingMicros
 		self.intervalMillis = intervalMillis
+		self.clockRoundTripMicros = clockRoundTripMicros
 	}
 
 	init(_ snapshot: ReceiverSnapshot) {
@@ -346,7 +354,8 @@ struct PaceReportMessage: Equatable {
 			unevenFrames: UInt32(clamping: snapshot.unevenFrames),
 			comparedFrames: UInt32(clamping: snapshot.comparedFrames),
 			pacingMicros: UInt32(clamping: Int((snapshot.pacing * 1000).rounded())),
-			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded()))
+			intervalMillis: UInt32(clamping: Int((snapshot.interval * 1000).rounded())),
+			clockRoundTripMicros: UInt32(clamping: snapshot.clockRoundTripMicros)
 		)
 	}
 
@@ -357,6 +366,7 @@ struct PaceReportMessage: Equatable {
 		WireHeader.store(comparedFrames, p, 8)
 		WireHeader.store(pacingMicros, p, 12)
 		WireHeader.store(intervalMillis, p, 16)
+		WireHeader.store(clockRoundTripMicros, p, 20)
 	}
 
 	static func decode(_ p: UnsafeRawPointer) throws -> PaceReportMessage {
@@ -365,8 +375,49 @@ struct PaceReportMessage: Equatable {
 			unevenFrames: WireHeader.load32(p, 4),
 			comparedFrames: WireHeader.load32(p, 8),
 			pacingMicros: WireHeader.load32(p, 12),
-			intervalMillis: WireHeader.load32(p, 16)
+			intervalMillis: WireHeader.load32(p, 16),
+			clockRoundTripMicros: WireHeader.load32(p, 20)
 		)
+	}
+}
+
+/// Receiver → sender, four times a second: asks for the sender's clock. See ``ClockOffsetEstimator``.
+struct ClockPingMessage: Equatable {
+	/// The receiver's host time when it sent the ping, in nanoseconds.
+	var sentTime: UInt64
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.clockPing.rawValue, p, 0)
+		WireHeader.store(sentTime, p, 8)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> ClockPingMessage {
+		try WireHeader.expect(.clockPing, p)
+		return ClockPingMessage(sentTime: WireHeader.load64(p, 8))
+	}
+}
+
+/// Sender → receiver: answers a `clockPing`.
+struct ClockPongMessage: Equatable {
+	/// The ping's `sentTime`, returned unchanged, on the receiver's clock.
+	var pingSentTime: UInt64
+	/// The sender's host time when the ping arrived and when this reply was written, in
+	/// nanoseconds. The time between them is the sender's own and is left out of the round trip.
+	var receivedTime: UInt64
+	var sentTime: UInt64
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.clockPong.rawValue, p, 0)
+		WireHeader.store(pingSentTime, p, 8)
+		WireHeader.store(receivedTime, p, 16)
+		WireHeader.store(sentTime, p, 24)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> ClockPongMessage {
+		try WireHeader.expect(.clockPong, p)
+		return ClockPongMessage(pingSentTime: WireHeader.load64(p, 8), receivedTime: WireHeader.load64(p, 16), sentTime: WireHeader.load64(p, 24))
 	}
 }
 

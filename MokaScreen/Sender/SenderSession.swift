@@ -444,7 +444,7 @@ final class SenderSession {
 					self.history.removeFirst(max(0, self.history.count - LatencyBreakdown.historyLength))
 				}
 				if case .connected = self.status {
-					self.recorder?.append(self.stats)
+					self.record(self.stats)
 				}
 			}
 		}
@@ -467,17 +467,27 @@ final class SenderSession {
 	}
 
 	private func updateRecorder() {
-		if recordsStats, recorder == nil {
+		if !recordsStats {
+			recorder = nil
+			recordingURL = nil
+		}
+	}
+
+	/// Appends a connected second to the recording. The file is created with the first row, so a
+	/// launch that never connects leaves no empty file behind now that the setting persists.
+	private func record(_ stats: SenderSnapshot) {
+		guard recordsStats else { return }
+		if recorder == nil {
 			do {
 				recorder = try StatsRecorder()
 				recordingURL = recorder?.url
 			} catch {
 				lastError = "Cannot record statistics: \(error.localizedDescription)"
 				recordsStats = false
+				return
 			}
-		} else if !recordsStats {
-			recorder = nil
 		}
+		recorder?.append(stats)
 	}
 }
 

@@ -33,6 +33,8 @@ final class FrameSender {
 	private var pendingSettings: SharedSettings?
 	/// A request for per-frame timing waiting to go out ahead of the next frame.
 	private var pendingTimingRequest: TimingRequestMessage?
+	/// A clock ping waiting to be answered, with this Mac's host time when it arrived.
+	private var pendingClockPing: (ping: ClockPingMessage, receivedTime: UInt64)?
 	private var dirty: DirtyRegion
 	private var running = true
 	private var nextFrameID: UInt64 = 1
@@ -125,8 +127,23 @@ final class FrameSender {
 
 		while true {
 			condition.lock()
-			while running && pendingSettings == nil && pendingTimingRequest == nil && (pending == nil || dirty.isEmpty) {
+			while running && pendingSettings == nil && pendingTimingRequest == nil && pendingClockPing == nil && (pending == nil || dirty.isEmpty) {
 				condition.wait()
+			}
+			// Answered ahead of everything else: the sooner the reply leaves, the less of this
+			// Mac's own time is in the exchange.
+			if running, let (ping, receivedTime) = pendingClockPing {
+				pendingClockPing = nil
+				condition.unlock()
+				do {
+					try stream.writeHeader {
+						ClockPongMessage(pingSentTime: ping.sentTime, receivedTime: receivedTime, sentTime: HostClock.now).encode(into: $0)
+					}
+				} catch {
+					fail(error)
+					return
+				}
+				continue
 			}
 			if running, let request = pendingTimingRequest {
 				pendingTimingRequest = nil
@@ -247,6 +264,12 @@ final class FrameSender {
 					stats.recordPaceReport(report)
 				case .frameTiming(let report):
 					timing.record(report)
+				case .clockPing(let ping):
+					let receivedTime = HostClock.now
+					condition.lock()
+					pendingClockPing = (ping, receivedTime)
+					condition.signal()
+					condition.unlock()
 				case .unknown:
 					break
 				}
@@ -277,6 +300,7 @@ private enum ReceiverMessage {
 	case displayReport(DisplayReportMessage)
 	case paceReport(PaceReportMessage)
 	case frameTiming(FrameTimingMessage)
+	case clockPing(ClockPingMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
@@ -286,6 +310,7 @@ private enum ReceiverMessage {
 		case .displayReport: .displayReport(try DisplayReportMessage.decode(p))
 		case .paceReport: .paceReport(try PaceReportMessage.decode(p))
 		case .frameTiming: .frameTiming(try FrameTimingMessage.decode(p))
+		case .clockPing: .clockPing(try ClockPingMessage.decode(p))
 		default: .unknown
 		}
 	}

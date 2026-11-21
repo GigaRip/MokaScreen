@@ -22,6 +22,12 @@ import Foundation
 /// transit beyond that. Each frame is scheduled for its capture time plus the smallest transit
 /// plus ``delay``, which covers the 99th-percentile lateness of the last second, so frames reach
 /// the glass spaced as they were captured. Used only on the render thread.
+///
+/// Once ``clockOffset`` is known, a frame's trip is its transit less the offset, and the
+/// quickest trip is the quickest of the whole connection rather than of the recent frames. The
+/// schedule then stays put. Without the offset it moves: during a scroll every recent frame is
+/// large, the smallest recent transit grows by a few milliseconds, and every frame's glass time
+/// moves later with it, then back when small frames return.
 struct FramePacer {
 	/// Frames whose transit is remembered: two seconds at 120 Hz. The quickest trip is taken over
 	/// all of them.
@@ -56,7 +62,17 @@ struct FramePacer {
 	/// instead of easing toward it.
 	private var settled = false
 	private var scratch: [Int64] = []
+	/// What a frame's capture time is added to before ``delay``: ``clockOffset`` plus
+	/// ``quickestTrip`` when the offset is known, otherwise the smallest recent transit.
 	private(set) var minimumTransit: Int64 = .max
+	/// The quickest trip since the connection began, in nanoseconds, measured against
+	/// ``clockOffset``; `.max` until a frame has been recorded with the offset known. Kept for the
+	/// whole connection: with the clocks' drift taken out by the offset, nothing makes it stale.
+	private(set) var quickestTrip: Int64 = .max
+	/// This Mac's host time minus the sender's, in nanoseconds, from ``ClockSync``; nil while
+	/// unknown. Takes effect at the next update of ``delay``, so the schedule moves no more often
+	/// than it did.
+	var clockOffset: Int64?
 	/// Nanoseconds added beyond the quickest trip, following how late recent frames were.
 	private(set) var delay: Int64 = maximumDelayNanos
 	/// The least delay to schedule with, whatever recent frames needed (Settings › Smoothness
@@ -93,7 +109,14 @@ struct FramePacer {
 			transits[next] = transit
 			next = (next + 1) % Self.window
 		}
-		minimumTransit = min(minimumTransit, transit)
+		if let clockOffset {
+			quickestTrip = min(quickestTrip, max(0, transit - clockOffset))
+			if minimumTransit == .max {
+				minimumTransit = clockOffset + quickestTrip
+			}
+		} else {
+			minimumTransit = min(minimumTransit, transit)
+		}
 		sinceUpdate += 1
 		if sinceUpdate >= Self.updateInterval || receivedTime &- lastUpdate >= Self.updateAfterNanos {
 			update(now: receivedTime)
@@ -109,14 +132,16 @@ struct FramePacer {
 
 	/// Forgets the recorded trips, e.g. when the sender's clock may have changed.
 	mutating func reset() {
+		let offset = clockOffset
 		self = FramePacer()
+		clockOffset = offset
 	}
 
 	private mutating func update(now: UInt64) {
 		sinceUpdate = 0
 		lastUpdate = now
-		guard let fastest = transits.min() else { return }
 		// The window's minimum, not the all-time one, so the clocks' slow drift is followed.
+		guard let fastest = clockOffset.map({ $0 + quickestTrip }) ?? transits.min() else { return }
 		minimumTransit = fastest
 		scratch.removeAll(keepingCapacity: true)
 		for (time, transit) in zip(received, transits) where now &- time <= Self.latenessHorizonNanos {

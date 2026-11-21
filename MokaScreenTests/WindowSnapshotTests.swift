@@ -48,6 +48,7 @@ struct WindowSnapshotTests {
 			snapshot.displayDrawsPerSecond = busy ? 117 : 0
 			snapshot.displayWait = second < 3 ? 0 : 7.0 + wobble * 0.3
 			snapshot.displayUnevenPerSecond = 0
+			snapshot.displayClockRoundTrip = second < 3 ? 0 : 0.18
 			snapshot.displayComparedPerSecond = busy ? 117 : 0
 			snapshot.displayPacing = second < 3 ? 0 : 20
 			history.append(snapshot)

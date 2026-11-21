@@ -157,6 +157,7 @@ private struct Loopback {
 	let receiverHeard = SettingsLog()
 	/// Durations of the timing requests the receiver heard, in milliseconds.
 	let timingRequests = TimingRequestLog()
+	let clock = ClockSync()
 
 	init(width: Int, height: Int, settings: SharedSettings = SharedSettings(showsStatistics: false, smoothMotion: false)) throws {
 		let port = UInt16.random(in: 48_000...58_000)
@@ -171,7 +172,7 @@ private struct Loopback {
 
 		let receiverStats = ReceiverStats()
 		let hello = DispatchSemaphore(value: 0)
-		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, onHello: { _ in hello.signal() }, onSettings: { [receiverHeard] in receiverHeard.record($0) }, onTimingRequest: { [timingRequests] in timingRequests.record($0.durationMillis) }, onClose: { _ in })
+		receiver = FrameReceiver(stream: serverStream, sink: sink, stats: receiverStats, clock: clock, onHello: { _ in hello.signal() }, onSettings: { [receiverHeard] in receiverHeard.record($0) }, onTimingRequest: { [timingRequests] in timingRequests.record($0.durationMillis) }, onClose: { _ in })
 		receiver.start()
 		try client.writeHeader { HelloMessage(width: UInt32(width), height: UInt32(height)).encode(into: $0) }
 		_ = try client.readHeader(HelloAckMessage.decode)
@@ -243,6 +244,18 @@ struct PipelineTests {
 		loopback.sender.submit(try makeFrame(width: width, height: height, fill: fill, dirty: [CGRect(x: 0, y: 0, width: width, height: height)]))
 		#expect(loopback.sink.waitForFrame())
 		#expect(loopback.sink.snapshot() == expectedImage(width: width, height: height, fill: fill))
+	}
+
+	@Test func clocksSynchronizeOverTheConnection() throws {
+		let loopback = try Loopback(width: 64, height: 48)
+		defer { loopback.close() }
+		for _ in 0..<150 where loopback.clock.offset == nil {
+			Thread.sleep(forTimeInterval: 0.02)
+		}
+		// Both ends read the same clock here, so the offset is zero to within half a round trip.
+		let offset = try #require(loopback.clock.offset)
+		#expect(abs(offset) <= ClockOffsetEstimator.maximumRoundTripNanos / 2)
+		#expect(loopback.clock.roundTripMicros > 0)
 	}
 
 	@Test func displayReportReachesTheSenderStatistics() throws {

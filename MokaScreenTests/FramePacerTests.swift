@@ -39,6 +39,48 @@ struct FramePacerTests {
 		#expect(pacer.delay == 3_500_000)
 	}
 
+	@Test func withSynchronizedClocksTheScheduleStaysPut() throws {
+		var pacer = FramePacer()
+		pacer.clockOffset = Int64(Self.clockOffset)
+		pacer.floorNanos = 20_000_000
+		var capture: UInt64 = 0
+		// Small frames, then a scroll's large ones: the quickest recent trip goes from 2 to 9 ms.
+		for n in 0..<720 {
+			capture = UInt64(n) * Self.refresh
+			let trip: UInt64 = n < 240 ? 2_000_000 : 9_000_000 + UInt64(n % 3) * 2_000_000
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + trip)
+			// Every frame is due 20 ms after the connection's quickest trip, whatever the recent
+			// trips were.
+			#expect(try #require(pacer.glassTime(captureTime: capture)) == capture + Self.clockOffset + 22_000_000)
+		}
+	}
+
+	@Test func withoutSynchronizedClocksTheScheduleMovesWithTheQuickestTrip() throws {
+		var pacer = FramePacer()
+		pacer.floorNanos = 20_000_000
+		var glass: [UInt64] = []
+		for n in 0..<720 {
+			let capture = UInt64(n) * Self.refresh
+			let trip: UInt64 = n < 240 ? 2_000_000 : 9_000_000
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + trip)
+			glass.append(try #require(pacer.glassTime(captureTime: capture)) - capture - Self.clockOffset)
+		}
+		#expect(glass[200] == 22_000_000)
+		#expect(glass[700] == 29_000_000)
+	}
+
+	@Test func synchronizedDelayIsCountedFromTheQuickestTrip() {
+		var pacer = FramePacer()
+		pacer.clockOffset = Int64(Self.clockOffset)
+		for n in 0..<240 {
+			let capture = UInt64(n) * Self.refresh
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + (n % 2 == 0 ? 2_000_000 : 12_000_000))
+		}
+		// The 10 ms spread plus the guard, as without synchronized clocks.
+		#expect(pacer.delay == 10_500_000)
+		#expect(pacer.quickestTrip == 2_000_000)
+	}
+
 	@Test func delayNeverExceedsThirtyMilliseconds() {
 		var pacer = FramePacer()
 		for n in 0..<240 {

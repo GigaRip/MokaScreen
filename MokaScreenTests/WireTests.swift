@@ -46,8 +46,15 @@ struct WireTests {
 	}
 
 	@Test func paceReportRoundTrips() throws {
-		let report = PaceReportMessage(unevenFrames: 7, comparedFrames: 109, pacingMicros: 4_250, intervalMillis: 1002)
+		let report = PaceReportMessage(unevenFrames: 7, comparedFrames: 109, pacingMicros: 4_250, intervalMillis: 1002, clockRoundTripMicros: 180)
 		#expect(try roundTrip(report.encode, PaceReportMessage.decode) == report)
+	}
+
+	@Test func clockMessagesRoundTrip() throws {
+		let ping = ClockPingMessage(sentTime: 987_654_321_012_345)
+		#expect(try roundTrip(ping.encode, ClockPingMessage.decode) == ping)
+		let pong = ClockPongMessage(pingSentTime: 987_654_321_012_345, receivedTime: 12_345_678_901, sentTime: 12_345_699_000)
+		#expect(try roundTrip(pong.encode, ClockPongMessage.decode) == pong)
 	}
 
 	@Test func presentedCarriesASignedGlassOffset() throws {

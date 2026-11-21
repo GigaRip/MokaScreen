@@ -75,12 +75,15 @@ final class ReceiverSession {
 		var refreshRate: RefreshRateRequest?
 		/// The panel's refreshes, noted by ``refreshRate`` and used by Smooth Motion.
 		let ticks = DisplayTicks()
+		/// The sender's clock, kept by ``receiver`` and used by Smooth Motion.
+		let clock: ClockSync
 		var activity: NSObjectProtocol?
 		var activationObservers: [NSObjectProtocol] = []
 
-		init(receiver: FrameReceiver, renderer: FrameRenderer) {
+		init(receiver: FrameReceiver, renderer: FrameRenderer, clock: ClockSync) {
 			self.receiver = receiver
 			self.renderer = renderer
+			self.clock = clock
 		}
 	}
 
@@ -139,6 +142,7 @@ final class ReceiverSession {
 			MainActor.assumeIsolated {
 				guard let self else { return }
 				self.stats = self.receiverStats.drain()
+				self.stats.clockRoundTripMicros = self.connection?.clock.roundTripMicros ?? 0
 				// The display Mac's window is hidden behind the picture while showing, so its
 				// share of the delay is shown on the other Mac.
 				if case .showing = self.status {
@@ -199,7 +203,8 @@ final class ReceiverSession {
 		}
 		receiverStats.resetRecent()
 		var connection: Connection!
-		let receiver = FrameReceiver(stream: stream, sink: renderer, stats: receiverStats, onHello: { [weak self] hello in
+		let clock = ClockSync()
+		let receiver = FrameReceiver(stream: stream, sink: renderer, stats: receiverStats, clock: clock, onHello: { [weak self] hello in
 			Task { @MainActor in
 				guard let self, self.connection === connection else { return }
 				self.show(connection, peer: stream.peerDescription, hello: hello)
@@ -215,7 +220,8 @@ final class ReceiverSession {
 				self.disconnect()
 			}
 		})
-		connection = Connection(receiver: receiver, renderer: renderer)
+		connection = Connection(receiver: receiver, renderer: renderer, clock: clock)
+		renderer.clock = clock
 		renderer.smoothMotion = SmoothMotionPreference.isOn(in: .standard)
 		renderer.smoothMotionFloorMillis = SmoothMotionFloorPreference.millis(in: .standard)
 		renderer.onPresented = { [weak receiver] frameID, glassTime in

@@ -65,6 +65,7 @@ final class FrameReceiver {
 	private let stream: ByteStream
 	private let sink: FrameSink
 	private let stats: ReceiverStats
+	private let clock: ClockSync?
 	private let onHello: (HelloMessage) -> Void
 	private let onSettings: (SharedSettings) -> Void
 	private let onTimingRequest: (TimingRequestMessage) -> Void
@@ -76,14 +77,16 @@ final class FrameReceiver {
 	private var ackScheduled = false
 
 	/// - Parameters:
+	///   - clock: Kept in step with the sender's clock by pinging it; nil sends no pings.
 	///   - onHello: Called on the reader thread once the sender is accepted.
 	///   - onSettings: Called on the reader thread when the sender changes a shared setting.
 	///   - onTimingRequest: Called on the reader thread when the sender asks for per-frame timing.
 	///   - onClose: Called once on the reader thread when the stream ends or fails.
-	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, onHello: @escaping (HelloMessage) -> Void, onSettings: @escaping (SharedSettings) -> Void, onTimingRequest: @escaping (TimingRequestMessage) -> Void = { _ in }, onClose: @escaping (Error) -> Void) {
+	init(stream: ByteStream, sink: FrameSink, stats: ReceiverStats, clock: ClockSync? = nil, onHello: @escaping (HelloMessage) -> Void, onSettings: @escaping (SharedSettings) -> Void, onTimingRequest: @escaping (TimingRequestMessage) -> Void = { _ in }, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.sink = sink
 		self.stats = stats
+		self.clock = clock
 		self.onHello = onHello
 		self.onSettings = onSettings
 		self.onTimingRequest = onTimingRequest
@@ -163,6 +166,23 @@ final class FrameReceiver {
 		}
 	}
 
+	/// Sends a clock ping now and another every ``ClockSync/pingInterval`` until a write fails,
+	/// which is how the loop ends when the connection does. Written on the queue that writes
+	/// `presented`.
+	private func sendClockPings() {
+		ackQueue.async { [weak self] in
+			guard let self else { return }
+			do {
+				try stream.writeHeader { ClockPingMessage(sentTime: HostClock.now).encode(into: $0) }
+			} catch {
+				return
+			}
+			ackQueue.asyncAfter(deadline: .now() + ClockSync.pingInterval) { [weak self] in
+				self?.sendClockPings()
+			}
+		}
+	}
+
 	private func run() throws {
 		let hello = try stream.readHeader(HelloMessage.decode)
 		guard hello.pixelFormat == Wire.pixelFormatBGRA8, hello.colorSpace == Wire.colorSpaceDisplayP3,
@@ -171,6 +191,9 @@ final class FrameReceiver {
 		try sink.configure(width: Int(hello.width), height: Int(hello.height))
 		try stream.writeHeader { HelloAckMessage().encode(into: $0) }
 		onHello(hello)
+		if clock != nil {
+			sendClockPings()
+		}
 
 		while true {
 			let begin: FrameBeginMessage
@@ -182,6 +205,9 @@ final class FrameReceiver {
 				continue
 			case .timingRequest(let message):
 				onTimingRequest(message)
+				continue
+			case .clockPong(let pong):
+				clock?.record(sent: pong.pingSentTime, peerReceived: pong.receivedTime, peerSent: pong.sentTime, received: HostClock.now)
 				continue
 			case .unknown:
 				continue
@@ -214,6 +240,7 @@ private enum SenderMessage {
 	case frameBegin(FrameBeginMessage)
 	case settings(SettingsMessage)
 	case timingRequest(TimingRequestMessage)
+	case clockPong(ClockPongMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> SenderMessage {
@@ -221,8 +248,9 @@ private enum SenderMessage {
 		case .frameBegin: .frameBegin(try FrameBeginMessage.decode(p))
 		case .settings: .settings(try SettingsMessage.decode(p))
 		case .timingRequest: .timingRequest(try TimingRequestMessage.decode(p))
+		case .clockPong: .clockPong(try ClockPongMessage.decode(p))
 		// A rect outside a frame is a protocol error, not an unknown message.
-		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport, .frameTiming: throw WireError.unexpectedMessage(WireHeader.type(p))
+		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport, .frameTiming, .clockPing: throw WireError.unexpectedMessage(WireHeader.type(p))
 		case nil: .unknown
 		}
 	}

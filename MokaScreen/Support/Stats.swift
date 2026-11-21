@@ -58,6 +58,9 @@ struct SenderSnapshot: Equatable {
 	var displayComparedPerSecond = 0.0
 	/// Smooth Motion's delay on the display Mac in milliseconds; zero while it is off.
 	var displayPacing = 0.0
+	/// The round trip of the ping the display Mac's clock offset came from, in milliseconds; zero
+	/// while the two Macs' clocks are not synchronized.
+	var displayClockRoundTrip = 0.0
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
@@ -182,6 +185,7 @@ final class SenderStats: @unchecked Sendable {
 				snapshot.displayUnevenPerSecond = Double(report.unevenFrames) / seconds
 				snapshot.displayComparedPerSecond = Double(report.comparedFrames) / seconds
 				snapshot.displayPacing = Double(report.pacingMicros) / 1000
+				snapshot.displayClockRoundTrip = Double(report.clockRoundTripMicros) / 1000
 			}
 			current = SenderSnapshot()
 			coverageSum = 0
@@ -210,6 +214,9 @@ struct ReceiverSnapshot: Equatable {
 	var comparedFrames = 0
 	/// Smooth Motion's current delay in milliseconds; zero while it is off.
 	var pacing = 0.0
+	/// The round trip of the ping the clock offset came from, in microseconds; zero while the
+	/// clocks are not synchronized. Filled in by ``ReceiverSession``, not by ``ReceiverStats``.
+	var clockRoundTripMicros = 0
 	/// Last byte received → frame handed to the display, in milliseconds.
 	var presentDelayP50 = 0.0
 	var presentDelayP99 = 0.0
