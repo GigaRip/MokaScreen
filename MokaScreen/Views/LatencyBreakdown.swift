@@ -10,8 +10,9 @@
 import Charts
 import SwiftUI
 
-/// The whole trip from capture to the other Mac's screen, split into its two halves: capture
-/// and the cable on this Mac's side, and the display Mac's share from its once-a-second report.
+/// The whole trip from capture to the other Mac's screen, with its parts: capture and the cable,
+/// timed on this Mac, and the display Mac's share from its once-a-second report. Each part is
+/// its own measurement, so together they can differ from the total by a fraction of a refresh.
 /// Shown in the extending Mac's window when Show Statistics is on.
 struct LatencyBreakdown: View {
 	/// Seconds of history charted.
@@ -39,14 +40,18 @@ struct LatencyBreakdown: View {
 		var smoothMotion: Double
 	}
 
-	/// Splits a second's typical trip. The display Mac reports its share (arrival to glass) and the
-	/// wait between a frame's arrival and its draw; under Smooth Motion that wait is the hold, so it
-	/// is shown apart from the display Mac's own work.
+	/// The parts of a second's typical trip. Capture and the cable are timed on this Mac. The
+	/// display Mac reports its share (arrival to glass) and the wait between a frame's arrival and
+	/// its draw; under Smooth Motion that wait is the hold, so it is shown apart from the display
+	/// Mac's own work.
+	///
+	/// Through 0.1.28 capture and the cable were the total less the display Mac's share. Those are
+	/// medians taken on two Macs over different frames, and with a few small frames a second the
+	/// difference fell to zero and below.
 	static func parts(of stats: SenderSnapshot) -> TripParts {
-		let total = stats.recentLatency
-		let display = min(stats.displayDelay, total)
+		let display = stats.displayDelay
 		let hold = stats.displayPacing > 0 ? min(stats.displayWait, display) : 0
-		return TripParts(captureAndCable: max(0, total - display), display: display - hold, smoothMotion: hold)
+		return TripParts(captureAndCable: stats.recentCaptureAndCable, display: display - hold, smoothMotion: hold)
 	}
 
 	/// Whether a frame has reached the display Mac's screen in the latest second or the charted
@@ -116,7 +121,10 @@ struct LatencyBreakdown: View {
 		// part-way across rather than growing rightwards from the left.
 		let offset = Self.historyLength - history.count
 		let seconds = Array(history.enumerated())
-		let peak = history.map(\.recentLatency).max() ?? 0
+		let peak = history.map { second -> Double in
+			let parts = Self.parts(of: second)
+			return max(second.recentLatency, parts.captureAndCable + parts.smoothMotion + parts.display)
+		}.max() ?? 0
 		let refreshes = Int(max(2, (peak / frameBudget).rounded(.up)))
 		return Chart {
 			ForEach(seconds, id: \.offset) { index, second in
@@ -182,7 +190,7 @@ struct LatencyBreakdown: View {
 /// spans two refreshes, and grows when a trip takes longer.
 private struct SplitBar: View {
 	let parts: LatencyBreakdown.TripParts
-	/// False before the display Mac's first report, when the whole trip is shown as capture + cable.
+	/// False before the display Mac's first report, when only capture + cable is known.
 	let hasReport: Bool
 	let frameBudget: Double
 

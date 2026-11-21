@@ -80,6 +80,17 @@ struct StatsTests {
 		#expect(snapshot.displayWait == 6.5)
 	}
 
+	@Test func captureAndCableIsTheMedianAndHoldsWhileIdle() {
+		let stats = SenderStats()
+		for ms in [1.0, 2.0, 12.0] {
+			stats.recordSent(bytes: 1000, rects: 1, coverage: 0.01, seconds: 0.0005, sinceCapture: ms / 1000)
+		}
+		#expect(stats.drain().recentCaptureAndCable == 2)
+		#expect(stats.drain().recentCaptureAndCable == 2)
+		stats.resetRecent()
+		#expect(stats.drain().recentCaptureAndCable == 0)
+	}
+
 	@Test func resetForgetsRecentLatency() {
 		let stats = SenderStats()
 		stats.recordPresented(latency: 0.030)

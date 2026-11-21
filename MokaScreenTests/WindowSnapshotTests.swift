@@ -40,6 +40,7 @@ struct WindowSnapshotTests {
 			// about 7 ms of it held on the display Mac.
 			snapshot.recentLatency = second < 2 ? 0 : 18.8 + wobble * 0.5
 			snapshot.recentLatencyP99 = second < 2 ? 0 : 24 + abs(wobble)
+			snapshot.recentCaptureAndCable = second < 2 ? 0 : 3.2 + wobble * 0.2
 			snapshot.latencyMax = busy ? 31 : 0
 			snapshot.displayDelay = second < 3 ? 0 : 15.6 + wobble * 0.3
 			snapshot.displayDelayP99 = second < 3 ? 0 : 19.4
