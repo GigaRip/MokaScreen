@@ -61,8 +61,12 @@ final class SenderSession {
 	}
 
 	/// Write one CSV row per second of activity to `~/Library/Logs/MokaScreen`.
+	/// Remembered across launches, so a recording left on covers a stall whenever it happens.
 	var recordsStats = false {
-		didSet { updateRecorder() }
+		didSet {
+			UserDefaults.standard.set(recordsStats, forKey: "recordsStats")
+			updateRecorder()
+		}
 	}
 
 	@ObservationIgnored private var display: VirtualDisplay?
@@ -92,6 +96,9 @@ final class SenderSession {
 		preferredReceiver = UserDefaults.standard.string(forKey: "preferredReceiver")
 		receiverPanel = UserDefaults.standard.data(forKey: "receiverPanel").flatMap { try? JSONDecoder().decode(PanelGeometry.self, from: $0) } ?? .macBookPro16
 		settingsSync = SettingsSync(send: { [link] settings in link.sendSettings(settings) })
+		// Property observers do not run during init, so the recorder is started by hand.
+		recordsStats = UserDefaults.standard.bool(forKey: "recordsStats")
+		updateRecorder()
 	}
 
 	var isRunning: Bool { status != .stopped }
@@ -365,6 +372,12 @@ final class SenderSession {
 		link.setSender(sender)
 		status = .connected(name)
 		lastError = nil
+		// The extending Mac's MokaScreen window is usually closed or covered, which makes the app
+		// eligible for App Nap; a napping app's network I/O and thread priority are throttled. The
+		// display Mac holds the same kind of activity while showing (ReceiverSession.beginShowing).
+		// Idle system sleep stays allowed: streaming alone is no reason to keep this Mac awake.
+		let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "Streaming a display to another Mac")
+		defer { ProcessInfo.processInfo.endActivity(activity) }
 		Log.transport.info("Connected to \(name, privacy: .public) at \(stream.peerDescription, privacy: .public)")
 
 		let error = await withTaskCancellationHandler {
@@ -426,6 +439,7 @@ final class SenderSession {
 				guard let self else { return }
 				self.stats = self.senderStats.drain()
 				if case .connected = self.status {
+					self.logIfStalled(self.stats)
 					self.history.append(self.stats)
 					self.history.removeFirst(max(0, self.history.count - LatencyBreakdown.historyLength))
 				}
@@ -434,6 +448,22 @@ final class SenderSession {
 				}
 			}
 		}
+	}
+
+	/// Frames taking longer than this to reach the display Mac's glass make the second a stall.
+	private static let stallLatencyMillis = 250.0
+
+	/// Writes a second's figures to the system log when frames took over
+	/// ``stallLatencyMillis`` to reach the glass, or none did. `notice` is the lowest level macOS keeps on
+	/// disk, so the figures can be read back days later with
+	/// `log show --predicate 'subsystem == "com.gigarip.mokascreen" AND category == "stall"'`.
+	/// They tell a slow cable (low Gbps, frames superseded) from a slow display Mac (high display
+	/// share, few draws) from slow capture (few frames captured).
+	private func logIfStalled(_ stats: SenderSnapshot) {
+		// A second with captures and not one frame reported shown is a stall too: nothing arrived.
+		let nothingShown = stats.capturedFrames >= 10 && stats.latencyMax == 0
+		guard stats.latencyMax > Self.stallLatencyMillis || nothingShown else { return }
+		Log.stall.notice("Slow second: captured \(stats.capturedFrames, privacy: .public), sent \(stats.sentFrames, privacy: .public), superseded \(stats.supersededFrames, privacy: .public), \(stats.bytes, privacy: .public) bytes, slowest send \(stats.slowestSendMillis, format: .fixed(precision: 0), privacy: .public) ms for \(stats.slowestSendBytes, privacy: .public) bytes; delay p50 \(stats.latencyP50, format: .fixed(precision: 0), privacy: .public) ms, max \(stats.latencyMax, format: .fixed(precision: 0), privacy: .public) ms; display Mac share \(stats.displayDelay, format: .fixed(precision: 0), privacy: .public) ms, wait \(stats.displayWait, format: .fixed(precision: 0), privacy: .public) ms, \(stats.displayDrawsPerSecond, format: .fixed(precision: 0), privacy: .public) draws/s, \(stats.displayPresentedFPS, format: .fixed(precision: 0), privacy: .public) shown/s")
 	}
 
 	private func updateRecorder() {

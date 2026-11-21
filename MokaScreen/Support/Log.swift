@@ -17,4 +17,6 @@ enum Log {
 	static let capture = Logger(subsystem: subsystem, category: "capture")
 	static let transport = Logger(subsystem: subsystem, category: "transport")
 	static let render = Logger(subsystem: subsystem, category: "render")
+	/// Seconds in which frames reached the display Mac far too late; kept on disk.
+	static let stall = Logger(subsystem: subsystem, category: "stall")
 }

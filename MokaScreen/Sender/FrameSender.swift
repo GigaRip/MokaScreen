@@ -223,9 +223,10 @@ final class FrameSender {
 		inflight.record(frameID: frameID, captureTime: frame.captureTime)
 		let start = HostClock.now
 		try stream.write(UnsafeBufferPointer(rebasing: chunks[0..<count]))
+		let end = HostClock.now
 		let coverage = Double(payloadBytes) / Double(width * height * 4)
-		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage)
-		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: HostClock.now, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage)))
+		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage, seconds: Double(end &- start) / 1e9)
+		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: end, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage)))
 	}
 
 	private func ackLoop() {

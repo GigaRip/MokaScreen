@@ -22,6 +22,10 @@ struct SenderSnapshot: Equatable {
 	var meanCoverage = 0.0
 	var maxCoverage = 0.0
 	/// Capture → `presented` acknowledgement, in milliseconds.
+	/// The frame that took longest to write to the cable: how long, in milliseconds, and its size.
+	/// Together they give the cable's throughput when it is the limit.
+	var slowestSendMillis = 0.0
+	var slowestSendBytes = 0
 	var latencyP50 = 0.0
 	var latencyP99 = 0.0
 	var latencyMax = 0.0
@@ -54,7 +58,7 @@ struct SenderSnapshot: Equatable {
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
 	var gigabitsPerSecond: Double { interval > 0 ? Double(bytes) * 8 / interval / 1e9 : 0 }
 
-	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms,display_uneven_per_s,display_compared_per_s,display_pacing_ms"
+	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms,display_uneven_per_s,display_compared_per_s,display_pacing_ms,slowest_send_ms,slowest_send_bytes"
 
 	func csvRow(at date: Date) -> String {
 		let rectsPerFrame = sentFrames > 0 ? Double(rects) / Double(sentFrames) : 0
@@ -69,6 +73,7 @@ struct SenderSnapshot: Equatable {
 			String(format: "%.2f", displayDelay), String(format: "%.2f", displayDelayP99), String(format: "%.1f", displayPresentedFPS),
 			String(format: "%.1f", displayDrawsPerSecond), String(format: "%.2f", displayWait),
 			String(format: "%.1f", displayUnevenPerSecond), String(format: "%.1f", displayComparedPerSecond), String(format: "%.2f", displayPacing),
+			String(format: "%.2f", slowestSendMillis), String(slowestSendBytes),
 		].joined(separator: ",")
 	}
 }
@@ -95,8 +100,13 @@ final class SenderStats: @unchecked Sendable {
 		lock.withLock { current.supersededFrames += 1 }
 	}
 
-	func recordSent(bytes: Int, rects: Int, coverage: Double) {
+	/// - Parameter seconds: How long the frame's write to the cable took.
+	func recordSent(bytes: Int, rects: Int, coverage: Double, seconds: Double) {
 		lock.withLock {
+			if seconds * 1000 > current.slowestSendMillis {
+				current.slowestSendMillis = seconds * 1000
+				current.slowestSendBytes = bytes
+			}
 			current.sentFrames += 1
 			current.bytes += bytes
 			current.rects += rects
