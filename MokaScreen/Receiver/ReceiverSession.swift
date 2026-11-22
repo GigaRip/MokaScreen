@@ -77,6 +77,10 @@ final class ReceiverSession {
 		let ticks = DisplayTicks()
 		/// The sender's clock, kept by ``receiver`` and used by Smooth Motion.
 		let clock: ClockSync
+		/// The sender's hello, kept so the window can be rebuilt.
+		var hello: HelloMessage?
+		/// When the window was last rebuilt because drawing was stuck, in host nanoseconds.
+		var lastRebuild: UInt64 = 0
 		var activity: NSObjectProtocol?
 		var activationObservers: [NSObjectProtocol] = []
 
@@ -263,6 +267,13 @@ final class ReceiverSession {
 		window.contentView = view
 
 		let driver = PresentationDriver(layer: view.metalLayer, renderer: connection.renderer)
+		driver.onSlowDrawable = { [weak self, weak connection] milliseconds, gotDrawable, stuck in
+			Task { @MainActor in
+				guard let self, let connection else { return }
+				self.drawableWasSlow(connection, milliseconds: milliseconds, gotDrawable: gotDrawable, stuck: stuck)
+			}
+		}
+		connection.hello = hello
 		connection.peer = peer
 		connection.window = window
 		connection.view = view
@@ -297,6 +308,44 @@ final class ReceiverSession {
 			driver.start()
 			beginShowing(connection)
 		}
+	}
+
+	/// The least time between rebuilds, so a display that stays stuck does not flash a new window
+	/// every second.
+	private static let rebuildIntervalNanos: UInt64 = 10_000_000_000
+
+	/// Records a slow `nextDrawable()` in the system log with the state macOS reports for the
+	/// window and screen, and rebuilds the window when drawing is stuck. See
+	/// ``DrawableStallDetector``.
+	private func drawableWasSlow(_ connection: Connection, milliseconds: Double, gotDrawable: Bool, stuck: Bool) {
+		guard self.connection === connection, let window = connection.window else { return }
+		let screen = window.screen
+		let size = connection.view?.metalLayer.drawableSize ?? .zero
+		let headroom = Double(screen?.maximumExtendedDynamicRangeColorComponentValue ?? 0)
+		let potentialHeadroom = Double(screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 0)
+		Log.stall.notice("Drawable took \(milliseconds, format: .fixed(precision: 0), privacy: .public) ms (\(gotDrawable ? "returned" : "timed out", privacy: .public)\(stuck ? ", stuck" : "", privacy: .public)): window visible \(window.isVisible, privacy: .public), occlusion visible \(window.occlusionState.contains(.visible), privacy: .public), app active \(NSApp.isActive, privacy: .public), status \(String(describing: self.status), privacy: .public); screen \(screen?.maximumFramesPerSecond ?? 0, privacy: .public) Hz, EDR headroom \(headroom, format: .fixed(precision: 2), privacy: .public) of \(potentialHeadroom, format: .fixed(precision: 1), privacy: .public); drawable \(Int(size.width), privacy: .public)×\(Int(size.height), privacy: .public)")
+		guard stuck, case .showing = status, let hello = connection.hello else { return }
+		let now = HostClock.now
+		guard connection.lastRebuild == 0 || now &- connection.lastRebuild >= Self.rebuildIntervalNanos else { return }
+		connection.lastRebuild = now
+		Log.stall.notice("Drawing is stuck; rebuilding the window")
+		rebuildPresentation(connection, hello: hello)
+	}
+
+	/// Replaces the window, its Metal layer and the render thread, keeping the connection and the
+	/// picture received so far: what a reconnect does for the presentation, without the reconnect.
+	private func rebuildPresentation(_ connection: Connection, hello: HelloMessage) {
+		for observer in connection.activationObservers {
+			NotificationCenter.default.removeObserver(observer)
+		}
+		connection.activationObservers = []
+		endShowing(connection)
+		connection.driver?.stop()
+		connection.driver = nil
+		connection.window = nil
+		connection.view = nil
+		show(connection, peer: connection.peer, hello: hello)
+		connection.renderer.setNeedsRedraw()
 	}
 
 	/// Hides the picture while another app is active. Frames keep arriving and are applied, so

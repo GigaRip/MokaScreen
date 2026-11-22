@@ -12,6 +12,54 @@ import QuartzCore
 import Testing
 @testable import MokaScreen
 
+@Suite struct DrawableStallDetectorTests {
+	private let ms: UInt64 = 1_000_000
+
+	@Test func promptDrawablesAreNotReported() {
+		var detector = DrawableStallDetector()
+		for wait in [0, 2, 8, 99] as [UInt64] {
+			let result = detector.record(waitNanos: wait * ms, gotDrawable: true)
+			#expect(result == nil)
+		}
+	}
+
+	@Test func oneTimedOutDrawableCountsAsStuck() {
+		var detector = DrawableStallDetector()
+		// As on 2026-11-21: a drawable only after the one-second timeout.
+		let first = detector.record(waitNanos: 1004 * ms, gotDrawable: true)
+		#expect(first?.milliseconds == 1004)
+		#expect(first?.stuck == true)
+		let second = detector.record(waitNanos: 1000 * ms, gotDrawable: false)
+		#expect(second?.stuck == true)
+	}
+
+	@Test func shortSlowWaitsMustAddUpBeforeCountingAsStuck() {
+		var detector = DrawableStallDetector()
+		for _ in 0..<2 {
+			let slow = detector.record(waitNanos: 300 * ms, gotDrawable: true)
+			#expect(slow?.stuck == false)
+		}
+		let third = detector.record(waitNanos: 300 * ms, gotDrawable: true)
+		#expect(third?.stuck == true)
+	}
+
+	@Test func aPromptDrawableEndsTheRun() {
+		var detector = DrawableStallDetector()
+		_ = detector.record(waitNanos: 600 * ms, gotDrawable: true)
+		let prompt = detector.record(waitNanos: 3 * ms, gotDrawable: true)
+		#expect(prompt == nil)
+		let again = detector.record(waitNanos: 600 * ms, gotDrawable: true)
+		#expect(again?.stuck == false)
+	}
+
+	@Test func aMissingDrawableIsSlowHoweverQuickly() {
+		var detector = DrawableStallDetector()
+		let missing = detector.record(waitNanos: 1 * ms, gotDrawable: false)
+		#expect(missing != nil)
+		#expect(missing?.stuck == false)
+	}
+}
+
 @Suite struct PresentationDriverTests {
 	/// A paused display Mac must keep freeing slots, or the reader blocks and the sender stalls.
 	@Test func pausedDriverKeepsTakingFrames() throws {

@@ -100,6 +100,11 @@ final class PresentationDriver {
 
 	private let layer: CAMetalLayer
 	private let renderer: FrameRenderer
+	/// Called on the render thread when `nextDrawable()` was slow: how long it took in
+	/// milliseconds, whether it returned a drawable, and whether drawing now counts as stuck
+	/// (see ``DrawableStallDetector``). Set before ``start()``.
+	var onSlowDrawable: ((_ milliseconds: Double, _ gotDrawable: Bool, _ stuck: Bool) -> Void)?
+	private var stalls = DrawableStallDetector()
 	private let wake = DispatchSemaphore(value: 0)
 	/// Guards `stopped`, `paused`, and `inFlight`, and signals when a drawable is presented.
 	private let condition = NSCondition()
@@ -181,7 +186,15 @@ final class PresentationDriver {
 			}
 			// More frames may be waiting behind this one; look again straight after drawing.
 			recheck = 0
-			guard let drawable = layer.nextDrawable() else { continue }
+			let asked = HostClock.now
+			let next = layer.nextDrawable()
+			if let slow = stalls.record(waitNanos: HostClock.now &- asked, gotDrawable: next != nil) {
+				onSlowDrawable?(slow.milliseconds, next != nil, slow.stuck)
+			}
+			// nextDrawable can block for a second; a driver stopped meanwhile must not draw, as its
+			// replacement may already be drawing with the same renderer.
+			if condition.withLock({ stopped }) { return }
+			guard let drawable = next else { continue }
 			let refresh = renderer.refreshInterval * 1e9
 			let grace = UInt64(refresh * Self.reportGraceRefreshes)
 			let pacedGrace = UInt64(refresh * Self.pacedReportGraceRefreshes)
@@ -225,6 +238,36 @@ final class PresentationDriver {
 				condition.signal()
 			}
 		}
+	}
+}
+
+/// Notices when `CAMetalLayer.nextDrawable()` stops returning drawables promptly.
+///
+/// Normally it returns within a refresh. On 2026-11-21 a display Mac began waiting almost exactly
+/// a second for every drawable, which is `nextDrawable()`'s own timeout, and stayed that way
+/// until MokaScreen was relaunched or the cable replugged: one or two draws a second, no frame
+/// reported shown, the receive slots full and the sender's writes blocked for up to 15 s. Its
+/// window was frontmost and not occluded. What stops macOS returning the layer's drawables is
+/// not known; a new window and layer, which is what a reconnect makes, has cured it every time.
+/// Used only on the render thread.
+struct DrawableStallDetector {
+	/// A wait this long is slow: twelve refreshes at 120 Hz.
+	static let slowNanos: UInt64 = 100_000_000
+	/// Slow waits in a row adding up to this much mean drawing is stuck. One timed-out
+	/// `nextDrawable()` is enough.
+	static let stuckNanos: UInt64 = 900_000_000
+
+	private var waited: UInt64 = 0
+
+	/// Records one call. Returns nil when it was prompt; otherwise how long it took and whether
+	/// the slow calls in a row now add up to ``stuckNanos``.
+	mutating func record(waitNanos: UInt64, gotDrawable: Bool) -> (milliseconds: Double, stuck: Bool)? {
+		guard waitNanos >= Self.slowNanos || !gotDrawable else {
+			waited = 0
+			return nil
+		}
+		waited &+= waitNanos
+		return (Double(waitNanos) / 1e6, waited >= Self.stuckNanos)
 	}
 }
 
