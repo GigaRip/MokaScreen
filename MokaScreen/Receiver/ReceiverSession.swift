@@ -12,6 +12,21 @@ import Observation
 import os
 import SystemConfiguration
 
+/// Tells a real return to MokaScreen from macOS bouncing it forward.
+///
+/// On 2026-11-22 (macOS 27.2), ⌘Tab from the picture to System Settings or Safari hid the picture
+/// and macOS made MokaScreen the active app again 43 and 50 ms later, so the picture came
+/// straight back; ⌘Tab to Terminal did not. Why macOS returns the activation is not known.
+/// Nobody switches away and back within a quarter of a second, so an activation that soon after
+/// a hide is taken to be the bounce and handed back to the app the user chose.
+enum ActivationBounce {
+	static let windowNanos: UInt64 = 250_000_000
+
+	static func isBounce(nanosSinceHidden: UInt64) -> Bool {
+		nanosSinceHidden < windowNanos
+	}
+}
+
 /// Runs this Mac as a display for another Mac.
 @MainActor
 @Observable
@@ -53,6 +68,10 @@ final class ReceiverSession {
 	@ObservationIgnored private var presentation: Presentation = .fullScreen
 	@ObservationIgnored private let receiverStats = ReceiverStats()
 	@ObservationIgnored private var settingsSync: SettingsSync!
+	/// When the picture was last hidden for another app, in host nanoseconds, and which app. See
+	/// ``ActivationBounce``. Cleared by the next activation, so only the first one after a hide is
+	/// ever handed back.
+	@ObservationIgnored private var lastHidden: (time: UInt64, app: NSRunningApplication)?
 
 	init() {
 		settingsSync = SettingsSync(send: { [weak self] settings in
@@ -360,15 +379,31 @@ final class ReceiverSession {
 	/// the sender is not held up and resuming shows the newest image.
 	private func pause() {
 		guard let connection, case .showing(let peer) = status else { return }
+		let chosen = NSWorkspace.shared.frontmostApplication
 		endShowing(connection)
 		status = .paused(peer: peer)
-		// Notice level, kept on disk: on 2026-11-22 switching to Safari or System Settings hid the
-		// picture and something brought it straight back, and nothing recorded what.
-		Log.app.notice("Picture hidden: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "another app", privacy: .public) is active")
+		if let chosen, chosen != .current {
+			lastHidden = (HostClock.now, chosen)
+		}
+		// Notice level, kept on disk, with what MokaScreen is left showing: its own window taking
+		// over as key window is one thing that might draw the activation back.
+		Log.app.notice("Picture hidden: \(chosen?.localizedName ?? "another app", privacy: .public) is active; MokaScreen's key window is now \(NSApp.keyWindow?.title ?? "none", privacy: .public), \(NSApp.windows.filter(\.isVisible).count, privacy: .public) of its windows visible")
 	}
 
 	private func resume() {
 		guard let connection, case .paused = status else { return }
+		if let hidden = lastHidden {
+			lastHidden = nil
+			let elapsed = HostClock.now &- hidden.time
+			if ActivationBounce.isBounce(nanosSinceHidden: elapsed), !hidden.app.isTerminated {
+				// Give the user the app they chose. Without the yield macOS treats the activation
+				// as a request it may decline, since MokaScreen is the active app.
+				Log.app.notice("MokaScreen was made active again \(elapsed / 1_000_000, privacy: .public) ms after \(hidden.app.localizedName ?? "another app", privacy: .public) was chosen; handing back to it")
+				NSApp.yieldActivation(to: hidden.app)
+				hidden.app.activate(from: .current, options: [])
+				return
+			}
+		}
 		beginShowing(connection)
 		Log.app.notice("Picture shown again: MokaScreen became the active app (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown", privacy: .public))")
 	}

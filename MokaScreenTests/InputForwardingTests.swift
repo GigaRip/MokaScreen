@@ -211,3 +211,16 @@ import Testing
 		#expect(hold.keyUp() == .stray)
 	}
 }
+
+@Suite struct ActivationBounceTests {
+	@Test func anActivationRightAfterAHideIsABounce() {
+		// As recorded: 43 and 50 ms after System Settings and Safari were chosen.
+		#expect(ActivationBounce.isBounce(nanosSinceHidden: 43_000_000))
+		#expect(ActivationBounce.isBounce(nanosSinceHidden: 50_000_000))
+	}
+
+	@Test func comingBackLaterIsNot() {
+		#expect(!ActivationBounce.isBounce(nanosSinceHidden: 250_000_000))
+		#expect(!ActivationBounce.isBounce(nanosSinceHidden: 2_100_000_000))
+	}
+}
