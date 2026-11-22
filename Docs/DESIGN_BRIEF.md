@@ -33,7 +33,7 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 
 **Receiver (the display Mac)**
 - Full-screen borderless window with a `CAMetalLayer`, shown directly (no WindowServer compositing). The reader receives straight into eight GPU-shared slot buffers; each draw blits the frames it applies into a private display texture and draws that to the drawable.
-- **Smooth Motion** (on by default): each frame is scheduled for its capture time plus the quickest recent trip plus a delay — the 99th-percentile lateness over the last second, at least 20 ms by default (Settings › Smoothness margin: Adaptive, 10, 20, 25 or 30 ms), at most 30 ms — moved to the panel's next refresh. A frame waits in its slot until a refresh before that time, so frames reach the glass spaced as they were captured. Without Smooth Motion, frames are presented on arrival.
+- **Smooth Motion** (on by default): each frame is scheduled for its capture time (the virtual display's refresh, moved to the display Mac's clock by the synchronized offset) plus the smoothness margin — 20 ms by default (Settings › Smoothness margin: 15, 20, 25 or 30 ms), rising on its own to at most 30 ms if the 99th-percentile arrival of the last second needs more — moved to the panel's next refresh. A frame waits in its slot until a refresh before that time, so frames reach the glass spaced as they were captured. Until the clocks are synchronized the schedule counts from the smallest recent transit instead. Without Smooth Motion, frames are presented on arrival.
 - **Refresh rate:** a display link pinned at 120 Hz (`RefreshRateRequest`, Settings › Hold the display at 120 Hz) holds the panel at 120 Hz while showing; its ticks give the refresh phase that Smooth Motion snaps to.
 - **In flight:** up to two drawables (three under Smooth Motion). Each stops counting when macOS reports it on the glass, or one refresh after its scheduled time (two after the draw, if presented at once) when no report comes.
 - **Keep-alive:** after 250 ms with no new frame, and every 250 ms while still, the unchanged picture is presented again, left out of the statistics.
@@ -64,7 +64,7 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 - Not yet checked on purpose: `bridge0` and the connection recovering cleanly after sleep/wake (left over from the first spike).
 - While the display Mac is paused, the extending Mac is not told: it still says "Extending to …" and its latency stops updating.
 - With more than one configured bridge service, the first enabled one is used, which may not be the Thunderbolt one.
-- Remaining unevenness (~0.5% of frame pairs): the first frame after a still moment lands one refresh late, and the schedule shifts by a refresh when the adaptive delay rises past the 20 ms minimum.
+- Remaining unevenness (~0.5% of frame pairs): the first frame after a still moment lands one refresh late, and the schedule shifts by a refresh if frames arrive late enough for the delay to rise past the margin.
 
 ## References
 

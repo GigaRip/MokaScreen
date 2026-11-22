@@ -68,7 +68,7 @@ final class FrameRenderer: FrameSink {
 		set { lock.withLock { pacesFrames = newValue } }
 	}
 
-	/// The least delay Smooth Motion schedules with, in milliseconds; 0 for adaptive. Thread-safe;
+	/// The least delay Smooth Motion schedules with, in milliseconds. Thread-safe;
 	/// takes effect from the next draw.
 	var smoothMotionFloorMillis: Int {
 		get { lock.withLock { Int(pacingFloorNanos / 1_000_000) } }

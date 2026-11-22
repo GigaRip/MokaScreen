@@ -162,10 +162,10 @@ sides in one process over loopback, with the received display in a window.
 	at its capture time plus a fixed delay, on one of its own refreshes, instead of
 	as soon as it arrives, so frames reach the glass spaced as they were captured
 	even though large frames, such as a scroll's, take uneven times on the cable.
-	The delay follows the 99th-percentile spread of frame trips over the last
-	second, up to 30 ms. **Settings › Smoothness margin** sets a floor under it
-	(20 ms by default; also Adaptive, 10, 25 or 30 ms), which also covers the
-	first frames of a scroll, before the adaptive delay has risen. *Uneven frames*
+	**Settings › Smoothness margin** is how long after a frame was captured it is
+	scheduled for the screen (20 ms by default; also 15, 25 or 30 ms). If frames
+	arrive later than the margin allows, the delay rises on its own, up to 30 ms.
+	*Uneven frames*
 	in the statistics counts frames whose spacing on the glass differed from their
 	capture spacing by more than half a refresh.
 - **Frame timing.** **Develop › Record Frame Timing** (⌥⌘T), on the Mac you work

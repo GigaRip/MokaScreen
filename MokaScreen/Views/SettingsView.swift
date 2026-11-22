@@ -29,7 +29,7 @@ struct SettingsView: View {
 				}
 				Picker(selection: $smoothMotionFloor) {
 					ForEach(SmoothMotionFloorPreference.choices, id: \.self) { millis in
-						Text(millis == 0 ? "Adaptive" : "\(millis) ms").tag(millis)
+						Text("\(millis) ms").tag(millis)
 					}
 				} label: {
 					Text("Smoothness margin")

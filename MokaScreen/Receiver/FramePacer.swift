@@ -23,11 +23,14 @@ import Foundation
 /// plus ``delay``, which covers the 99th-percentile lateness of the last second, so frames reach
 /// the glass spaced as they were captured. Used only on the render thread.
 ///
-/// Once ``clockOffset`` is known, a frame's trip is its transit less the offset, and the
-/// quickest trip is the quickest of the whole connection rather than of the recent frames. The
-/// schedule then stays put. Without the offset it moves: during a scroll every recent frame is
-/// large, the smallest recent transit grows by a few milliseconds, and every frame's glass time
-/// moves later with it, then back when small frames return.
+/// Once ``clockOffset`` is known the smallest transit is not used: each frame is scheduled for
+/// its capture time, moved to this Mac's clock, plus ``delay``. The capture time is the virtual
+/// display's refresh, and ScreenCaptureKit hands frames over as much as 7.7 ms before it (frame
+/// timing recordings of 2026-11-21), so a small frame can arrive before its capture time and
+/// "the quickest trip" is not a fixed quantity to build a schedule on. Counted from the capture
+/// time the schedule stays put. Counted from the smallest recent transit it moves: during a
+/// scroll every recent frame is large, the smallest transit grows by a few milliseconds, and
+/// every frame's glass time moves later with it, then back when small frames return.
 struct FramePacer {
 	/// Frames whose transit is remembered: two seconds at 120 Hz. The quickest trip is taken over
 	/// all of them.
@@ -62,21 +65,19 @@ struct FramePacer {
 	/// instead of easing toward it.
 	private var settled = false
 	private var scratch: [Int64] = []
-	/// What a frame's capture time is added to before ``delay``: ``clockOffset`` plus
-	/// ``quickestTrip`` when the offset is known, otherwise the smallest recent transit.
+	/// What a frame's capture time is added to before ``delay``: ``clockOffset`` when known,
+	/// otherwise the smallest recent transit.
 	private(set) var minimumTransit: Int64 = .max
-	/// The quickest trip since the connection began, in nanoseconds, measured against
-	/// ``clockOffset``; `.max` until a frame has been recorded with the offset known. Kept for the
-	/// whole connection: with the clocks' drift taken out by the offset, nothing makes it stale.
-	private(set) var quickestTrip: Int64 = .max
 	/// This Mac's host time minus the sender's, in nanoseconds, from ``ClockSync``; nil while
 	/// unknown. Takes effect at the next update of ``delay``, so the schedule moves no more often
 	/// than it did.
 	var clockOffset: Int64?
-	/// Nanoseconds added beyond the quickest trip, following how late recent frames were.
+	/// Nanoseconds the recent frames needed, from the 99th-percentile arrival of the last second:
+	/// counted from the capture time when ``clockOffset`` is known, otherwise from the smallest
+	/// recent transit. It exceeds ``floorNanos`` only when frames arrive later than the margin
+	/// allows for.
 	private(set) var delay: Int64 = maximumDelayNanos
-	/// The least delay to schedule with, whatever recent frames needed (Settings › Smoothness
-	/// margin). Zero leaves the delay adaptive.
+	/// The least delay to schedule with (Settings › Smoothness margin).
 	var floorNanos: Int64 = 0
 
 	/// The delay frames are scheduled with: ``delay``, raised to ``floorNanos``.
@@ -110,9 +111,8 @@ struct FramePacer {
 			next = (next + 1) % Self.window
 		}
 		if let clockOffset {
-			quickestTrip = min(quickestTrip, max(0, transit - clockOffset))
 			if minimumTransit == .max {
-				minimumTransit = clockOffset + quickestTrip
+				minimumTransit = clockOffset
 			}
 		} else {
 			minimumTransit = min(minimumTransit, transit)
@@ -141,7 +141,7 @@ struct FramePacer {
 		sinceUpdate = 0
 		lastUpdate = now
 		// The window's minimum, not the all-time one, so the clocks' slow drift is followed.
-		guard let fastest = clockOffset.map({ $0 + quickestTrip }) ?? transits.min() else { return }
+		guard let fastest = clockOffset ?? transits.min() else { return }
 		minimumTransit = fastest
 		scratch.removeAll(keepingCapacity: true)
 		for (time, transit) in zip(received, transits) where now &- time <= Self.latenessHorizonNanos {

@@ -96,14 +96,21 @@ enum SmoothMotionPreference {
 	}
 }
 
-/// The least Smooth Motion holds a frame beyond the quickest recent trip, in milliseconds; 0
-/// leaves the delay to follow how late recent frames were. The first frames of a scroll are the
-/// largest and arrived 11–20 ms later than the quickest frames in frame timing recordings on
-/// 2026-11-14, before the adaptive delay had risen to cover them. 25 and 30 ms leave more room
-/// above the latest frames, for comparing by eye.
+/// How long after a frame's capture time Smooth Motion schedules it for the glass, in
+/// milliseconds, before the move to the display Mac's next refresh.
+///
+/// A frame has to arrive a refresh (8.3 ms) before that time. In frame timing recordings of
+/// 2026-11-21 (scrolls changing 48% of the screen, 0.1.31) the latest frame arrived about 6 ms
+/// after its capture time, so 15 ms is about the least that kept every frame on time there, with
+/// nothing to spare for a larger frame or a busier Mac; 20 ms left the tightest frame 15–20 ms
+/// against the 8.3 it needed. 25 and 30 ms leave more room, for comparing by eye.
+///
+/// Through 0.1.31 there were also Adaptive (follow the latest recent frames, with no minimum)
+/// and 10 ms. Both date from when the delay was counted from the quickest recent frame; counted
+/// from the capture time, neither leaves a frame its refresh.
 enum SmoothMotionFloorPreference {
 	static let key = "smoothMotionFloorMillis"
-	static let choices = [0, 10, 20, 25, 30]
+	static let choices = [15, 20, 25, 30]
 	static let defaultValue = 20
 
 	static func millis(in defaults: UserDefaults) -> Int {

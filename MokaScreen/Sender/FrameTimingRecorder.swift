@@ -35,6 +35,10 @@ final class FrameTimingRecorder: Sendable {
 		var bytes: Int64
 		var rects: Int32
 		var coverage: Float
+		/// When the send thread took the frame, host ns; 0 when not recorded.
+		var pickupTime: UInt64 = 0
+		/// How long `CVPixelBufferLockBaseAddress` took for the frame, in nanoseconds.
+		var lockNanos: UInt64 = 0
 	}
 
 	/// Enough for 30 seconds at 120 Hz with room to spare.
@@ -84,7 +88,7 @@ final class FrameTimingRecorder: Sendable {
 		if isActive { displays.append(display) }
 	}
 
-	static let csvHeader = "capture_ms,capture_gap_ms,submit_lag_ms,dirty_rects,frame_id,send_start_lag_ms,send_ms,bytes,rects,coverage,received_ms,drawn_ms,glass_ms,glass_gap_ms,drawn_together,paced,target_ms"
+	static let csvHeader = "capture_ms,capture_gap_ms,submit_lag_ms,dirty_rects,frame_id,send_start_lag_ms,send_ms,bytes,rects,coverage,received_ms,drawn_ms,glass_ms,glass_gap_ms,drawn_together,paced,target_ms,pickup_lag_ms,lock_ms"
 
 	/// One row per capture, oldest first. Times in each group share an origin: capture and send
 	/// columns the first capture on this Mac's clock; received, drawn and glass columns the first
@@ -92,7 +96,9 @@ final class FrameTimingRecorder: Sendable {
 	/// newer one before it could be sent. `glass_gap_ms` is the time since the previous frame
 	/// reached the glass; frames drawn together share a glass time. `target_ms` is when Smooth
 	/// Motion asked for the frame to be presented, on the display Mac's clock; empty when it was
-	/// presented at once.
+	/// presented at once. `pickup_lag_ms` is when the send thread took the frame, after its
+	/// capture time like the other lags, and `lock_ms` how long gaining access to its pixels took;
+	/// the two split the time between `submit_lag_ms` and `send_start_lag_ms`.
 	static func csv(captures: [Capture], sends: [Send], displays: [FrameTimingMessage]) -> String {
 		var sendByCapture: [UInt64: Send] = [:]
 		for send in sends where sendByCapture[send.captureTime] == nil {
@@ -156,6 +162,11 @@ final class FrameTimingRecorder: Sendable {
 				}
 			} else {
 				fields += Array(repeating: "", count: 13)
+			}
+			if let send = sendByCapture[capture.captureTime], send.pickupTime != 0 {
+				fields += [ms(send.pickupTime, from: capture.captureTime), String(format: "%.3f", Double(send.lockNanos) / 1e6)]
+			} else {
+				fields += ["", ""]
 			}
 			lines.append(fields.joined(separator: ","))
 		}

@@ -178,6 +178,7 @@ final class FrameSender {
 				: dirty.rectangles()
 			dirty.removeAll()
 			condition.unlock()
+			let pickupTime = HostClock.now
 
 			guard CVPixelBufferGetWidth(frame.pixelBuffer) == width, CVPixelBufferGetHeight(frame.pixelBuffer) == height else {
 				Log.capture.error("Dropping frame of unexpected size \(CVPixelBufferGetWidth(frame.pixelBuffer), privacy: .public)×\(CVPixelBufferGetHeight(frame.pixelBuffer), privacy: .public)")
@@ -185,7 +186,7 @@ final class FrameSender {
 			}
 
 			do {
-				try send(frame, rects: rects, chunks: &chunks, headers: headers)
+				try send(frame, rects: rects, pickupTime: pickupTime, chunks: &chunks, headers: headers)
 			} catch {
 				fail(error)
 				return
@@ -193,9 +194,13 @@ final class FrameSender {
 		}
 	}
 
-	private func send(_ frame: CapturedFrame, rects: [PixelRect], chunks: inout UnsafeMutableBufferPointer<UnsafeRawBufferPointer>, headers: UnsafeMutableRawPointer) throws {
+	private func send(_ frame: CapturedFrame, rects: [PixelRect], pickupTime: UInt64, chunks: inout UnsafeMutableBufferPointer<UnsafeRawBufferPointer>, headers: UnsafeMutableRawPointer) throws {
 		let pixelBuffer = frame.pixelBuffer
+		// Timed for Record Frame Timing: 0.8–1.4 ms pass between a frame's hand-off and the start
+		// of its write, and waking this thread accounts for 0.01 ms of it (measured 2026-11-21).
+		let lockStart = HostClock.now
 		CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+		let lockNanos = HostClock.now &- lockStart
 		defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 		guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
 		let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
@@ -243,7 +248,7 @@ final class FrameSender {
 		let end = HostClock.now
 		let coverage = Double(payloadBytes) / Double(width * height * 4)
 		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage, seconds: Double(end &- start) / 1e9, sinceHandoff: frame.handoffTime.map { Double(end &- min(end, $0)) / 1e9 })
-		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: end, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage)))
+		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: end, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage), pickupTime: pickupTime, lockNanos: lockNanos))
 	}
 
 	private func ackLoop() {

@@ -71,10 +71,18 @@ struct SettingsSyncTests {
 	@Test func smoothMotionMinimumDelayTravels() throws {
 		let pair = try Pair()
 		#expect(SharedSettings.load(from: pair.display).smoothMotionFloorMillis == 20)
-		pair.extending.set(0, forKey: SmoothMotionFloorPreference.key)
-		#expect(SharedSettings.load(from: pair.display).smoothMotionFloorMillis == 0)
-		#expect(pair.displayChanges.last?.smoothMotionFloorMillis == 0)
+		pair.extending.set(15, forKey: SmoothMotionFloorPreference.key)
+		#expect(SharedSettings.load(from: pair.display).smoothMotionFloorMillis == 15)
+		#expect(pair.displayChanges.last?.smoothMotionFloorMillis == 15)
 		#expect(pair.displaySent.isEmpty)
+	}
+
+	@Test func aMarginThatIsNoLongerOfferedFallsBackToTheDefault() {
+		let defaults = UserDefaults(suiteName: "MokaScreenTests.margin.\(UUID().uuidString)")!
+		for stored in [0, 10] {
+			defaults.set(stored, forKey: SmoothMotionFloorPreference.key)
+			#expect(SmoothMotionFloorPreference.millis(in: defaults) == 20)
+		}
 	}
 
 	@Test func fixedRefreshRateIsOnUntilTurnedOffAndTravels() throws {

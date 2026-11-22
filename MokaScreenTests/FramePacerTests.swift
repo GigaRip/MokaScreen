@@ -49,9 +49,8 @@ struct FramePacerTests {
 			capture = UInt64(n) * Self.refresh
 			let trip: UInt64 = n < 240 ? 2_000_000 : 9_000_000 + UInt64(n % 3) * 2_000_000
 			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + trip)
-			// Every frame is due 20 ms after the connection's quickest trip, whatever the recent
-			// trips were.
-			#expect(try #require(pacer.glassTime(captureTime: capture)) == capture + Self.clockOffset + 22_000_000)
+			// Every frame is due 20 ms after its capture, whatever the recent trips were.
+			#expect(try #require(pacer.glassTime(captureTime: capture)) == capture + Self.clockOffset + 20_000_000)
 		}
 	}
 
@@ -69,16 +68,29 @@ struct FramePacerTests {
 		#expect(glass[700] == 29_000_000)
 	}
 
-	@Test func synchronizedDelayIsCountedFromTheQuickestTrip() {
+	@Test func withSynchronizedClocksAFrameMayArriveBeforeItsCaptureTime() throws {
+		var pacer = FramePacer()
+		pacer.clockOffset = Int64(Self.clockOffset)
+		pacer.floorNanos = 20_000_000
+		// ScreenCaptureKit hands frames over before their capture time: small ones arrive 7 ms
+		// early, a scroll's large ones 1 ms early.
+		for n in 0..<480 {
+			let capture = 1_000_000_000 + UInt64(n) * Self.refresh
+			let early: UInt64 = n < 240 ? 7_000_000 : 1_000_000
+			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset - early)
+			#expect(try #require(pacer.glassTime(captureTime: capture)) == capture + Self.clockOffset + 20_000_000)
+		}
+	}
+
+	@Test func synchronizedDelayIsCountedFromTheCaptureTime() {
 		var pacer = FramePacer()
 		pacer.clockOffset = Int64(Self.clockOffset)
 		for n in 0..<240 {
 			let capture = UInt64(n) * Self.refresh
 			pacer.record(captureTime: capture, receivedTime: capture + Self.clockOffset + (n % 2 == 0 ? 2_000_000 : 12_000_000))
 		}
-		// The 10 ms spread plus the guard, as without synchronized clocks.
-		#expect(pacer.delay == 10_500_000)
-		#expect(pacer.quickestTrip == 2_000_000)
+		// The latest arrival, 12 ms after capture, plus the guard.
+		#expect(pacer.delay == 12_500_000)
 	}
 
 	@Test func delayNeverExceedsThirtyMilliseconds() {

@@ -24,7 +24,7 @@ import Testing
 			FrameTimingRecorder.Capture(captureTime: base + 25 * ms, submitTime: base + 26 * ms, dirtyRects: 1),
 		]
 		let sends = [
-			FrameTimingRecorder.Send(frameID: 1, captureTime: base, startTime: base + 2 * ms, endTime: base + 4 * ms, bytes: 1000, rects: 3, coverage: 0.5),
+			FrameTimingRecorder.Send(frameID: 1, captureTime: base, startTime: base + 2 * ms, endTime: base + 4 * ms, bytes: 1000, rects: 3, coverage: 0.5, pickupTime: base + ms + 10_000, lockNanos: 900_000),
 			FrameTimingRecorder.Send(frameID: 2, captureTime: base + 16_666_667, startTime: base + 18 * ms, endTime: base + 19 * ms, bytes: 500, rects: 2, coverage: 0.25),
 			FrameTimingRecorder.Send(frameID: 3, captureTime: base + 25 * ms, startTime: base + 27 * ms, endTime: base + 28 * ms, bytes: 100, rects: 1, coverage: 0.05),
 		]
@@ -39,7 +39,12 @@ import Testing
 			.split(separator: "\n").map { $0.split(separator: ",", omittingEmptySubsequences: false).map(String.init) }
 		#expect(rows.first?.joined(separator: ",") == FrameTimingRecorder.csvHeader)
 		#expect(rows.count == 5)
-		#expect(rows.dropFirst().allSatisfy { $0.count == 17 })
+		#expect(rows.dropFirst().allSatisfy { $0.count == 19 })
+		// First frame: taken by the send thread 1.010 ms after its capture time; 0.9 ms to lock.
+		#expect(rows[1][17] == "1.010")
+		#expect(rows[1][18] == "0.900")
+		// A send recorded without them leaves both empty.
+		#expect(rows[3][17].isEmpty && rows[3][18].isEmpty)
 
 		// First frame: received at the display origin, on glass 8 ms later.
 		#expect(rows[1][0] == "0.000")
