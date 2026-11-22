@@ -149,7 +149,7 @@ sides in one process over loopback, with the received display in a window.
 - **Statistics.** **Settings › Show statistics** shows, on the Mac you work
 	on, capture/send rates, the share of the screen sent per frame, and capture →
 	on-glass latency, measured from the display Mac's presentation callback and
-	split into capture + cable, Smooth Motion's hold, and the display Mac's own
+	split into the cable, Smooth Motion's hold, and the display Mac's own
 	share. Its colour is green within two refreshes beyond Smooth Motion's delay.
 	*Record statistics to a CSV file* writes one row per second to
 	`~/Library/Logs/MokaScreen/` for studying real workloads.

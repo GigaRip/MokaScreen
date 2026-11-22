@@ -80,15 +80,17 @@ struct StatsTests {
 		#expect(snapshot.displayWait == 6.5)
 	}
 
-	@Test func captureAndCableIsTheMedianAndHoldsWhileIdle() {
+	@Test func cableTimeIsTheMedianAndHoldsWhileIdle() {
 		let stats = SenderStats()
 		for ms in [1.0, 2.0, 12.0] {
-			stats.recordSent(bytes: 1000, rects: 1, coverage: 0.01, seconds: 0.0005, sinceCapture: ms / 1000)
+			stats.recordSent(bytes: 1000, rects: 1, coverage: 0.01, seconds: 0.0005, sinceHandoff: ms / 1000)
 		}
-		#expect(stats.drain().recentCaptureAndCable == 2)
-		#expect(stats.drain().recentCaptureAndCable == 2)
+		// A frame sent again at the start of a connection has no hand-off time and is left out.
+		stats.recordSent(bytes: 1000, rects: 1, coverage: 1, seconds: 0.0005, sinceHandoff: nil)
+		#expect(stats.drain().recentCable == 2)
+		#expect(stats.drain().recentCable == 2)
 		stats.resetRecent()
-		#expect(stats.drain().recentCaptureAndCable == 0)
+		#expect(stats.drain().recentCable == 0)
 	}
 
 	@Test func resetForgetsRecentLatency() {

@@ -17,12 +17,12 @@ struct LatencyBreakdownTests {
 	@Test func smoothMotionsHoldIsShownApartFromTheDisplayMac() {
 		var stats = SenderSnapshot()
 		stats.recentLatency = 18.8
-		stats.recentCaptureAndCable = 3.2
+		stats.recentCable = 3.2
 		stats.displayDelay = 15.6
 		stats.displayWait = 7.0
 		stats.displayPacing = 20
 		let parts = LatencyBreakdown.parts(of: stats)
-		#expect(abs(parts.captureAndCable - 3.2) < 1e-9)
+		#expect(abs(parts.cable - 3.2) < 1e-9)
 		#expect(abs(parts.smoothMotion - 7.0) < 1e-9)
 		#expect(abs(parts.display - 8.6) < 1e-9)
 	}
@@ -37,17 +37,17 @@ struct LatencyBreakdownTests {
 		#expect(parts.display == 6.5)
 	}
 
-	@Test func captureAndCableIsItsOwnMeasurementNotTheRemainder() {
+	@Test func cableTimeIsItsOwnMeasurementNotTheRemainder() {
 		// A few small frames a second, as on 2026-11-21: the display Mac's median equalled the
 		// total, and the remainder read 0.0 ms.
 		var stats = SenderSnapshot()
 		stats.recentLatency = 25.2
-		stats.recentCaptureAndCable = 1.3
+		stats.recentCable = 1.3
 		stats.displayDelay = 25.2
 		stats.displayWait = 18.7
 		stats.displayPacing = 30
 		let parts = LatencyBreakdown.parts(of: stats)
-		#expect(parts.captureAndCable == 1.3)
+		#expect(parts.cable == 1.3)
 		#expect(abs(parts.smoothMotion - 18.7) < 1e-9)
 		#expect(abs(parts.display - 6.5) < 1e-9)
 	}

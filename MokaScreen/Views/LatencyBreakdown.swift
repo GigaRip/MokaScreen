@@ -10,9 +10,11 @@
 import Charts
 import SwiftUI
 
-/// The whole trip from capture to the other Mac's screen, with its parts: capture and the cable,
-/// timed on this Mac, and the display Mac's share from its once-a-second report. Each part is
-/// its own measurement, so together they can differ from the total by a fraction of a refresh.
+/// The whole trip from capture to the other Mac's screen, with its parts: this Mac's time
+/// getting a frame onto the cable, and the display Mac's share from its once-a-second report.
+/// Each part is its own measurement. The total counts from the frame's capture time, which is
+/// the virtual display's refresh, and macOS hands frames over a few milliseconds before that,
+/// so for small frames the parts add up to a little more than the total.
 /// Shown in the extending Mac's window when Show Statistics is on.
 struct LatencyBreakdown: View {
 	/// Seconds of history charted.
@@ -33,25 +35,26 @@ struct LatencyBreakdown: View {
 
 	/// A trip from capture to glass split into its parts, in milliseconds.
 	struct TripParts: Equatable {
-		var captureAndCable: Double
+		var cable: Double
 		/// The display Mac's own share: drawing and waiting for the panel.
 		var display: Double
 		/// The time Smooth Motion held the frame before drawing it; zero while it is off.
 		var smoothMotion: Double
 	}
 
-	/// The parts of a second's typical trip. Capture and the cable are timed on this Mac. The
+	/// The parts of a second's typical trip. The cable time is measured on this Mac, from a frame
+	/// being handed over to the end of its write. The
 	/// display Mac reports its share (arrival to glass) and the wait between a frame's arrival and
 	/// its draw; under Smooth Motion that wait is the hold, so it is shown apart from the display
 	/// Mac's own work.
 	///
-	/// Through 0.1.28 capture and the cable were the total less the display Mac's share. Those are
+	/// Through 0.1.28 this Mac's part was the total less the display Mac's share. Those are
 	/// medians taken on two Macs over different frames, and with a few small frames a second the
 	/// difference fell to zero and below.
 	static func parts(of stats: SenderSnapshot) -> TripParts {
 		let display = stats.displayDelay
 		let hold = stats.displayPacing > 0 ? min(stats.displayWait, display) : 0
-		return TripParts(captureAndCable: stats.recentCaptureAndCable, display: display - hold, smoothMotion: hold)
+		return TripParts(cable: stats.recentCable, display: display - hold, smoothMotion: hold)
 	}
 
 	/// Whether a frame has reached the display Mac's screen in the latest second or the charted
@@ -107,7 +110,7 @@ struct LatencyBreakdown: View {
 			Self.sectionLabel("LAST MINUTE")
 				.fixedSize()
 			Spacer()
-			LegendSwatch(label: "Capture + cable", color: Self.captureColor)
+			LegendSwatch(label: "Cable", color: Self.captureColor)
 			if showsSmoothMotion {
 				LegendSwatch(label: "Smooth Motion", color: Self.smoothMotionColor)
 			}
@@ -123,7 +126,7 @@ struct LatencyBreakdown: View {
 		let seconds = Array(history.enumerated())
 		let peak = history.map { second -> Double in
 			let parts = Self.parts(of: second)
-			return max(second.recentLatency, parts.captureAndCable + parts.smoothMotion + parts.display)
+			return max(second.recentLatency, parts.cable + parts.smoothMotion + parts.display)
 		}.max() ?? 0
 		let refreshes = Int(max(2, (peak / frameBudget).rounded(.up)))
 		return Chart {
@@ -136,8 +139,8 @@ struct LatencyBreakdown: View {
 					AreaMark(x: .value("Second", index + offset), y: .value("ms", parts.smoothMotion), stacking: .standard)
 						.foregroundStyle(by: .value("Part", "Smooth Motion"))
 						.interpolationMethod(.monotone)
-					AreaMark(x: .value("Second", index + offset), y: .value("ms", parts.captureAndCable), stacking: .standard)
-						.foregroundStyle(by: .value("Part", "Capture + cable"))
+					AreaMark(x: .value("Second", index + offset), y: .value("ms", parts.cable), stacking: .standard)
+						.foregroundStyle(by: .value("Part", "Cable"))
 						.interpolationMethod(.monotone)
 				}
 			}
@@ -147,7 +150,7 @@ struct LatencyBreakdown: View {
 					.foregroundStyle(.secondary.opacity(0.6))
 			}
 		}
-		.chartForegroundStyleScale(["Display Mac": Self.displayColor.gradient, "Smooth Motion": Self.smoothMotionColor.gradient, "Capture + cable": Self.captureColor.gradient])
+		.chartForegroundStyleScale(["Display Mac": Self.displayColor.gradient, "Smooth Motion": Self.smoothMotionColor.gradient, "Cable": Self.captureColor.gradient])
 		.chartXScale(domain: 0...(Self.historyLength - 1))
 		.chartYScale(domain: 0...(Double(refreshes) * frameBudget))
 		.chartXAxis(.hidden)
@@ -190,12 +193,12 @@ struct LatencyBreakdown: View {
 /// spans two refreshes, and grows when a trip takes longer.
 private struct SplitBar: View {
 	let parts: LatencyBreakdown.TripParts
-	/// False before the display Mac's first report, when only capture + cable is known.
+	/// False before the display Mac's first report, when only the cable time is known.
 	let hasReport: Bool
 	let frameBudget: Double
 
 	var body: some View {
-		let total = parts.captureAndCable + (hasReport ? parts.smoothMotion + parts.display : 0)
+		let total = parts.cable + (hasReport ? parts.smoothMotion + parts.display : 0)
 		let scale = max(total, frameBudget * 2)
 		VStack(alignment: .leading, spacing: 6) {
 			GeometryReader { proxy in
@@ -206,7 +209,7 @@ private struct SplitBar: View {
 					HStack(spacing: 2) {
 						Rectangle()
 							.fill(LatencyBreakdown.captureColor.gradient)
-							.frame(width: width * parts.captureAndCable / scale)
+							.frame(width: width * parts.cable / scale)
 						if hasReport {
 							if parts.smoothMotion > 0 {
 								Rectangle()
@@ -229,7 +232,7 @@ private struct SplitBar: View {
 			}
 			.frame(height: 10)
 			HStack(spacing: 14) {
-				part("Capture + cable", parts.captureAndCable, color: LatencyBreakdown.captureColor)
+				part("Cable", parts.cable, color: LatencyBreakdown.captureColor)
 				Spacer()
 				if hasReport {
 					if parts.smoothMotion > 0 {

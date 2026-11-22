@@ -242,7 +242,7 @@ final class FrameSender {
 		try stream.write(UnsafeBufferPointer(rebasing: chunks[0..<count]))
 		let end = HostClock.now
 		let coverage = Double(payloadBytes) / Double(width * height * 4)
-		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage, seconds: Double(end &- start) / 1e9, sinceCapture: Double(end &- min(end, frame.captureTime)) / 1e9)
+		stats.recordSent(bytes: payloadBytes + headerSlots * Wire.headerSize, rects: rects.count, coverage: coverage, seconds: Double(end &- start) / 1e9, sinceHandoff: frame.handoffTime.map { Double(end &- min(end, $0)) / 1e9 })
 		timing.record(FrameTimingRecorder.Send(frameID: frameID, captureTime: frame.captureTime, startTime: start, endTime: end, bytes: Int64(payloadBytes), rects: Int32(clamping: rects.count), coverage: Float(coverage)))
 	}
 

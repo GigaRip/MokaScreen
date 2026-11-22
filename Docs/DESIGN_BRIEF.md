@@ -55,7 +55,7 @@ mokascreen.com. Free macOS app that turns a second MacBook into a low-latency ex
 ## Measuring
 
 - Settings › Developer mode adds the Develop menu with the tools below; the user-facing settings (Smooth Motion, smoothness margin, 120 Hz, statistics) are in Settings.
-- Settings › Show statistics: rates, coverage, and capture → glass latency split into capture + cable, Smooth Motion's hold, and the display Mac's own share.
+- Settings › Show statistics: rates, coverage, and capture → glass latency split into the cable (hand-off to end of write, timed on the extending Mac), Smooth Motion's hold, and the display Mac's own share.
 - Develop › Record Frame Timing (⌥⌘T): 10 s of per-frame capture, send, arrival, draw, scheduled and glass times from both Macs, one CSV row per capture, in `~/Library/Logs/MokaScreen/`. Compare each pair of consecutive shown frames' glass spacing with their capture spacing; a difference over half a refresh is an uneven pair.
 - Develop › Show Latency Clock: a millisecond clock on every screen, for filming glass-to-glass latency.
 

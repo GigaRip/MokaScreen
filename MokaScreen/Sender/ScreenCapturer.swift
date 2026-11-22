@@ -21,8 +21,14 @@ struct CapturedFrame: @unchecked Sendable {
 	let pixelBuffer: CVPixelBuffer
 	/// Changed areas in pixel coordinates of `pixelBuffer`.
 	let dirtyRects: [CGRect]
-	/// Host time of capture, in nanoseconds.
+	/// ScreenCaptureKit's presentation time for the frame, in host nanoseconds: the virtual
+	/// display's refresh the frame belongs to. It lies on the display's 120 Hz ticks to within
+	/// 0.03 ms, and ScreenCaptureKit hands the frame over a median 3 ms before it (up to 7 ms; frame
+	/// timing recording of 2026-11-21), so it is not the time the frame reached MokaScreen.
 	let captureTime: UInt64
+	/// Host time at which ScreenCaptureKit handed the frame over, in nanoseconds; nil for a frame
+	/// sent again later, such as the last picture at the start of a connection.
+	var handoffTime: UInt64?
 }
 
 /// Errors starting capture.
@@ -38,7 +44,7 @@ enum CaptureError: Error, CustomStringConvertible {
 	}
 }
 
-/// Captures one display with ScreenCaptureKit at up to 120 frames per second.
+/// Captures one display with ScreenCaptureKit, a frame for every refresh in which it changed.
 final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 	private let displayID: CGDirectDisplayID
 	private let width: Int
@@ -82,7 +88,12 @@ final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 		config.scalesToFit = false
 		config.pixelFormat = kCVPixelFormatType_32BGRA
 		config.colorSpaceName = CGColorSpace.displayP3
-		config.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+		// Half a refresh, so the limit never binds: the display has a new picture at most every
+		// 1/120 s. With the limit at exactly 1/120 s, frames of a scroll were handed over every
+		// 8.8 ms rather than 8.33 (recordings of 2026-11-14 and 2026-11-21): each came 0.45 ms later
+		// against its refresh than the one before, until a refresh was skipped about every fifteenth
+		// frame. Whether the limit caused that is what this setting tests.
+		config.minimumFrameInterval = CMTime(value: 1, timescale: 240)
 		config.showsCursor = true
 		config.capturesAudio = false
 		// The sender holds at most three buffers at once (the newest capture, the frame being
@@ -117,7 +128,7 @@ final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 			?? [CGRect(x: 0, y: 0, width: width, height: height)]
 		let pts = sampleBuffer.presentationTimeStamp
 		let captureTime = pts.isValid ? UInt64(max(0, pts.seconds) * 1e9) : HostClock.now
-		onFrame(CapturedFrame(sampleBuffer: sampleBuffer, pixelBuffer: pixelBuffer, dirtyRects: dirtyRects, captureTime: captureTime))
+		onFrame(CapturedFrame(sampleBuffer: sampleBuffer, pixelBuffer: pixelBuffer, dirtyRects: dirtyRects, captureTime: captureTime, handoffTime: HostClock.now))
 	}
 
 	func stream(_ stream: SCStream, didStopWithError error: Error) {

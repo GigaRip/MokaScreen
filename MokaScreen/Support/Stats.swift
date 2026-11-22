@@ -35,11 +35,15 @@ struct SenderSnapshot: Equatable {
 	var recentLatency = 0.0
 	/// 99th percentile over the same frames as ``recentLatency``.
 	var recentLatencyP99 = 0.0
-	/// Median time from a frame's capture to the end of its write to the cable over the most
-	/// recent frames, in milliseconds; 0 before the first. Both ends are read on this Mac's
-	/// clock. The write returns once the last bytes are in the 4 MB socket buffer, so a
-	/// full-screen frame's figure is up to about half a millisecond short of its arrival.
-	var recentCaptureAndCable = 0.0
+	/// Median time from ScreenCaptureKit handing a frame over to the end of its write to the
+	/// cable over the most recent frames, in milliseconds; 0 before the first. Both ends are read
+	/// on this Mac's clock. The write returns once the last bytes are in the 4 MB socket buffer,
+	/// so a full-screen frame's figure is up to about half a millisecond short of its arrival.
+	///
+	/// Counted from the hand-off, not from the frame's capture time: the hand-off comes before
+	/// that time (see ``CapturedFrame/captureTime``), so a small frame is on the cable before it,
+	/// and 0.1.29's figure from the capture time read zero in some seconds.
+	var recentCable = 0.0
 	/// The display Mac's share of ``recentLatency``, from its last report: the rolling median and
 	/// p99 from a frame's last byte arriving to it being on glass, in milliseconds; 0 before the
 	/// first report.
@@ -66,7 +70,7 @@ struct SenderSnapshot: Equatable {
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
 	var gigabitsPerSecond: Double { interval > 0 ? Double(bytes) * 8 / interval / 1e9 : 0 }
 
-	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms,display_uneven_per_s,display_compared_per_s,display_pacing_ms,slowest_send_ms,slowest_send_bytes,capture_and_cable_p50_ms"
+	static let csvHeader = "time,captured_fps,sent_fps,superseded,full_frames,gbps,rects_per_frame,mean_coverage_pct,max_coverage_pct,latency_p50_ms,latency_p99_ms,latency_max_ms,recent_latency_p50_ms,display_share_p50_ms,display_share_p99_ms,display_presented_fps,display_draws_per_s,display_wait_p50_ms,display_uneven_per_s,display_compared_per_s,display_pacing_ms,slowest_send_ms,slowest_send_bytes,cable_p50_ms"
 
 	func csvRow(at date: Date) -> String {
 		let rectsPerFrame = sentFrames > 0 ? Double(rects) / Double(sentFrames) : 0
@@ -82,7 +86,7 @@ struct SenderSnapshot: Equatable {
 			String(format: "%.1f", displayDrawsPerSecond), String(format: "%.2f", displayWait),
 			String(format: "%.1f", displayUnevenPerSecond), String(format: "%.1f", displayComparedPerSecond), String(format: "%.2f", displayPacing),
 			String(format: "%.2f", slowestSendMillis), String(slowestSendBytes),
-			String(format: "%.2f", recentCaptureAndCable),
+			String(format: "%.2f", recentCable),
 		].joined(separator: ",")
 	}
 }
@@ -112,10 +116,13 @@ final class SenderStats: @unchecked Sendable {
 
 	/// - Parameters:
 	///   - seconds: How long the frame's write to the cable took.
-	///   - sinceCapture: Seconds from the frame's capture to the end of that write.
-	func recordSent(bytes: Int, rects: Int, coverage: Double, seconds: Double, sinceCapture: Double) {
+	///   - sinceHandoff: Seconds from ScreenCaptureKit handing the frame over to the end of that
+	///     write; nil for a frame sent again later, which is left out.
+	func recordSent(bytes: Int, rects: Int, coverage: Double, seconds: Double, sinceHandoff: Double?) {
 		lock.withLock {
-			recentSends.append(sinceCapture * 1000)
+			if let sinceHandoff {
+				recentSends.append(sinceHandoff * 1000)
+			}
 			if seconds * 1000 > current.slowestSendMillis {
 				current.slowestSendMillis = seconds * 1000
 				current.slowestSendBytes = bytes
@@ -172,7 +179,7 @@ final class SenderStats: @unchecked Sendable {
 			snapshot.latencyP99 = Percentile.of(sorted, 0.99)
 			snapshot.latencyMax = sorted.last ?? 0
 			(snapshot.recentLatency, snapshot.recentLatencyP99) = recent.percentiles()
-			snapshot.recentCaptureAndCable = recentSends.percentiles().p50
+			snapshot.recentCable = recentSends.percentiles().p50
 			if let report = displayReport {
 				snapshot.displayDelay = Double(report.delayP50Micros) / 1000
 				snapshot.displayDelayP99 = Double(report.delayP99Micros) / 1000

@@ -92,10 +92,15 @@ final class TCPStream: ByteStream {
 		set(SOL_SOCKET, SO_NOSIGPIPE, 1)
 		// Every write is a complete, latency-critical frame; Nagle would hold back its tail.
 		set(IPPROTO_TCP, TCP_NODELAY, 1)
-		// The link's bandwidth-delay product is well under 1 MB (~69 Gbps × ~50 µs). 4 MB keeps the
-		// pipe full without letting the kernel queue more than ~0.5 ms of stale pixels.
-		set(SOL_SOCKET, SO_SNDBUF, 4 << 20)
-		set(SOL_SOCKET, SO_RCVBUF, 4 << 20)
+		// 8 MB is the most macOS allows (kern.ipc.maxsockbuf). A frame written after a pause of
+		// 2 ms or more goes out several times slower than one written back to back, and frames are
+		// always about 5 ms apart: in recordings a 14.6 MB frame took 3.4 ms, 34 Gbps, where 30.9 MB
+		// ones reached 68. Over loopback on 2026-11-21 a 14.5 MB frame after a 5 ms pause took 4.3 ms
+		// with 4 MB buffers and 3.0 ms with 7 MB; the congestion window stayed fully open either
+		// way. Not yet measured on the cable. 8 MB is about 1 ms of pixels at the cable's speed,
+		// and less than one large frame, so little that is stale can queue.
+		set(SOL_SOCKET, SO_SNDBUF, 8 << 20)
+		set(SOL_SOCKET, SO_RCVBUF, 8 << 20)
 		// A peer that sleeps or loses the cable never sends a FIN. Keepalive catches an idle dead
 		// peer within ~5 s, and TCP_RXT_CONNDROPTIME aborts a write stuck retransmitting after 3 s,
 		// so both sides fall back to reconnecting instead of hanging.
