@@ -379,21 +379,34 @@ final class DisplayTicks: Sendable {
 
 /// A borderless window that covers a whole screen, including the area beside the notch.
 ///
-/// ⌘Esc leaves (see ``InputCapture/isExitChord(_:)``). With ``forwardsInput`` on, every other
-/// keyboard and trackpad event the window is given goes to ``onInput`` and no further.
+/// Holding Esc leaves (see ``EscapeHold``). With ``forwardsInput`` on, every keyboard and
+/// trackpad event the window is given goes to ``onInput`` and no further.
 final class FullScreenWindow: NSWindow {
 	var onExit: (() -> Void)?
 	/// Whether keyboard and trackpad events are sent to ``onInput`` and kept from AppKit.
 	var forwardsInput = false
 	var onInput: ((InputMessage) -> Void)?
 
+	private var escape = EscapeHold()
+	private var exitTimer: DispatchWorkItem?
+	private var hintTimer: DispatchWorkItem?
+	private var hint: NSWindow?
+
 	override var canBecomeKey: Bool { true }
 	override var canBecomeMain: Bool { true }
 
 	/// Returns true when the event was dealt with here.
 	private func intercept(_ event: NSEvent) -> Bool {
+		if event.type == .keyDown, event.keyCode == InputCapture.escapeKeyCode, !InputCapture.isPlainEscape(event) {
+			// Kept on disk, to learn which Esc chords macOS lets an app see.
+			Log.app.notice("Esc arrived with modifiers \(event.modifierFlags.intersection(.deviceIndependentFlagsMask).rawValue, format: .hex, privacy: .public)")
+		}
 		if InputCapture.isExitChord(event) {
 			onExit?()
+			return true
+		}
+		if InputCapture.isPlainEscape(event) {
+			handleEscape(event)
 			return true
 		}
 		guard forwardsInput else { return false }
@@ -412,6 +425,93 @@ final class FullScreenWindow: NSWindow {
 		if !intercept(event) {
 			super.sendEvent(event)
 		}
+	}
+
+	private func handleEscape(_ event: NSEvent) {
+		let action = event.type == .keyDown ? escape.keyDown(isRepeat: event.isARepeat) : escape.keyUp()
+		switch action {
+		case .began:
+			forwardKey(event)
+			startExitTimers()
+		case .repeating:
+			// A hold that began before the window was key has no timers yet.
+			if exitTimer == nil {
+				startExitTimers()
+			}
+		case .ended, .stray:
+			cancelEscapeHold()
+			forwardKey(event)
+		}
+	}
+
+	private func forwardKey(_ event: NSEvent) {
+		guard forwardsInput, case .forward(let message) = InputCapture.disposition(for: event) else { return }
+		onInput?(message)
+	}
+
+	private func startExitTimers() {
+		let showHint = DispatchWorkItem { [weak self] in self?.showExitHint() }
+		let exit = DispatchWorkItem { [weak self] in
+			guard let self else { return }
+			self.cancelEscapeHold()
+			self.onExit?()
+		}
+		hintTimer = showHint
+		exitTimer = exit
+		DispatchQueue.main.asyncAfter(deadline: .now() + InputCapture.exitHintSeconds, execute: showHint)
+		DispatchQueue.main.asyncAfter(deadline: .now() + InputCapture.exitHoldSeconds, execute: exit)
+	}
+
+	private func cancelEscapeHold() {
+		escape.cancel()
+		exitTimer?.cancel()
+		hintTimer?.cancel()
+		exitTimer = nil
+		hintTimer = nil
+		if let hint {
+			removeChildWindow(hint)
+			hint.orderOut(nil)
+		}
+		hint = nil
+	}
+
+	/// Shows "Keep holding Esc to leave MokaScreen" over the picture. Anything above the Metal
+	/// layer makes WindowServer composite the window, a refresh of extra delay, so the hint is a
+	/// separate window that exists only while Esc is held.
+	private func showExitHint() {
+		let label = NSTextField(labelWithString: "Keep holding Esc to leave MokaScreen")
+		label.font = .systemFont(ofSize: 15, weight: .medium)
+		label.textColor = .white
+		label.sizeToFit()
+		let size = NSSize(width: label.frame.width + 36, height: label.frame.height + 22)
+		let background = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+		background.material = .hudWindow
+		background.state = .active
+		background.wantsLayer = true
+		background.layer?.cornerRadius = 12
+		background.layer?.masksToBounds = true
+		label.setFrameOrigin(NSPoint(x: 18, y: 11))
+		background.addSubview(label)
+
+		let origin = NSPoint(x: frame.midX - size.width / 2, y: frame.minY + 96)
+		let panel = NSPanel(contentRect: NSRect(origin: origin, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+		panel.isOpaque = false
+		panel.backgroundColor = .clear
+		panel.hasShadow = true
+		panel.ignoresMouseEvents = true
+		panel.contentView = background
+		hint = panel
+		addChildWindow(panel, ordered: .above)
+	}
+
+	override func resignKey() {
+		super.resignKey()
+		cancelEscapeHold()
+	}
+
+	override func orderOut(_ sender: Any?) {
+		cancelEscapeHold()
+		super.orderOut(sender)
 	}
 
 	// NSApplication offers a key press to the key window as a key equivalent, then to the menu

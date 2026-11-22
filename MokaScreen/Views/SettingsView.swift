@@ -48,7 +48,7 @@ struct SettingsView: View {
 			Section {
 				Toggle(isOn: $forwardsInput) {
 					Text("Share the keyboard and trackpad")
-					Text("The keyboard and trackpad of the MacBook showing the display also control the Mac you work on. On that MacBook, ⌘Tab still switches its own apps and ⌘Esc leaves MokaScreen. New, and still being tested.")
+					Text("The keyboard and trackpad of the MacBook showing the display also control the Mac you work on. On that MacBook, ⌘Tab still switches its own apps, and holding Esc leaves MokaScreen. New, and still being tested.")
 				}
 			} header: {
 				Text("Keyboard and trackpad")

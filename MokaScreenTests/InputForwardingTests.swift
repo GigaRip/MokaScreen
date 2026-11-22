@@ -105,6 +105,15 @@ import Testing
 		try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: isRepeat, keyCode: code))
 	}
 
+	@Test func plainEscapeIsToldFromEscapeWithAModifier() throws {
+		#expect(InputCapture.isPlainEscape(try key(.keyDown, code: 53)))
+		#expect(InputCapture.isPlainEscape(try key(.keyUp, code: 53)))
+		#expect(InputCapture.isPlainEscape(try key(.keyDown, code: 53, flags: .capsLock)))
+		#expect(!InputCapture.isPlainEscape(try key(.keyDown, code: 53, flags: .command)))
+		#expect(!InputCapture.isPlainEscape(try key(.keyDown, code: 53, flags: .shift)))
+		#expect(!InputCapture.isPlainEscape(try key(.keyDown, code: 12)))
+	}
+
 	@Test func commandEscapeLeavesAndPlainEscapeDoesNot() throws {
 		#expect(InputCapture.isExitChord(try key(.keyDown, code: 53, flags: .command)))
 		#expect(!InputCapture.isExitChord(try key(.keyDown, code: 53)))
@@ -168,5 +177,37 @@ import Testing
 		#expect(scroll.pointY == -24)
 		#expect(scroll.pointX == 3)
 		#expect(scroll.phase == 2)
+	}
+}
+
+@Suite struct EscapeHoldTests {
+	@Test func aPressIsForwardedDownAndUp() {
+		var hold = EscapeHold()
+		#expect(hold.keyDown(isRepeat: false) == .began)
+		#expect(hold.keyUp() == .ended)
+		#expect(!hold.isHeld)
+	}
+
+	@Test func repeatsWhileHeldAreKeptBack() {
+		var hold = EscapeHold()
+		#expect(hold.keyDown(isRepeat: false) == .began)
+		for _ in 0..<5 {
+			#expect(hold.keyDown(isRepeat: true) == .repeating)
+		}
+		#expect(hold.keyUp() == .ended)
+	}
+
+	@Test func aHoldThatBeganElsewhereStillCounts() {
+		// Esc already down when the window became key: the first event seen is a repeat.
+		var hold = EscapeHold()
+		#expect(hold.keyDown(isRepeat: true) == .repeating)
+		#expect(hold.isHeld)
+	}
+
+	@Test func aKeyUpAfterLeavingIsStray() {
+		var hold = EscapeHold()
+		_ = hold.keyDown(isRepeat: false)
+		hold.cancel()
+		#expect(hold.keyUp() == .stray)
 	}
 }

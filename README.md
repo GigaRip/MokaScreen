@@ -44,7 +44,7 @@ Do this once on each Mac.
 
 From then on MokaScreen remembers each Mac's role and connects by itself when it
 opens. On the display Mac, switching to another app pauses the picture and switching
-back to MokaScreen resumes it; press **⌘Esc** to get your screen back.
+back to MokaScreen resumes it; hold **Esc** for a second to get your screen back.
 
 Smooth Motion, how much margin it keeps, holding the display at 120 Hz, and
 statistics are in **MokaScreen › Settings** (⌘,), and stay the same on both Macs.

@@ -306,6 +306,7 @@ final class ReceiverSession {
 			if NSApp.isActive {
 				resume()
 			} else {
+				Log.app.notice("Asking macOS to bring MokaScreen forward for a connection from \(peer, privacy: .public) (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown", privacy: .public))")
 				NSApp.activate()
 			}
 		case .window:
@@ -328,7 +329,10 @@ final class ReceiverSession {
 		let headroom = Double(screen?.maximumExtendedDynamicRangeColorComponentValue ?? 0)
 		let potentialHeadroom = Double(screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 0)
 		Log.stall.notice("Drawable took \(milliseconds, format: .fixed(precision: 0), privacy: .public) ms (\(gotDrawable ? "returned" : "timed out", privacy: .public)\(stuck ? ", stuck" : "", privacy: .public)): window visible \(window.isVisible, privacy: .public), occlusion visible \(window.occlusionState.contains(.visible), privacy: .public), app active \(NSApp.isActive, privacy: .public), status \(String(describing: self.status), privacy: .public); screen \(screen?.maximumFramesPerSecond ?? 0, privacy: .public) Hz, EDR headroom \(headroom, format: .fixed(precision: 2), privacy: .public) of \(potentialHeadroom, format: .fixed(precision: 1), privacy: .public); drawable \(Int(size.width), privacy: .public)×\(Int(size.height), privacy: .public)")
-		guard stuck, case .showing = status, let hello = connection.hello else { return }
+		// Only while this Mac's user is looking at the picture. Another app's window covering it
+		// slows drawing in the same way, and rebuilding then would bring MokaScreen back in front
+		// of the app the user had just switched to.
+		guard stuck, case .showing = status, NSApp.isActive, window.isVisible, let hello = connection.hello else { return }
 		let now = HostClock.now
 		guard connection.lastRebuild == 0 || now &- connection.lastRebuild >= Self.rebuildIntervalNanos else { return }
 		connection.lastRebuild = now
@@ -358,13 +362,15 @@ final class ReceiverSession {
 		guard let connection, case .showing(let peer) = status else { return }
 		endShowing(connection)
 		status = .paused(peer: peer)
-		Log.transport.info("Paused: another app is active")
+		// Notice level, kept on disk: on 2026-11-22 switching to Safari or System Settings hid the
+		// picture and something brought it straight back, and nothing recorded what.
+		Log.app.notice("Picture hidden: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "another app", privacy: .public) is active")
 	}
 
 	private func resume() {
 		guard let connection, case .paused = status else { return }
 		beginShowing(connection)
-		Log.transport.info("Resumed")
+		Log.app.notice("Picture shown again: MokaScreen became the active app (frontmost: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown", privacy: .public))")
 	}
 
 	private func beginShowing(_ connection: Connection) {

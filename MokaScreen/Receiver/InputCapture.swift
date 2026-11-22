@@ -30,11 +30,23 @@ enum InputCapture {
 	/// The key code of Esc.
 	static let escapeKeyCode: UInt16 = 53
 
-	/// ⌘Esc, which leaves MokaScreen. Plain Esc is forwarded like any other key; until 0.1.33 it
-	/// was the way out, which would have kept it from every app on the other Mac.
+	/// How long Esc is held to leave MokaScreen.
+	static let exitHoldSeconds = 1.0
+	/// How long Esc is held before the hint appears, so that an ordinary press shows nothing.
+	static let exitHintSeconds = 0.3
+
+	/// ⌘Esc. 0.1.34 made it the way out, and on the one Mac it was tried on (macOS 27.2) pressing
+	/// it did nothing; whether macOS keeps the key from apps is not known. It still leaves if it
+	/// arrives. The way out that is known to arrive is holding Esc (see ``EscapeHold``).
 	static func isExitChord(_ event: NSEvent) -> Bool {
 		event.type == .keyDown && event.keyCode == escapeKeyCode
 			&& event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]) == .command
+	}
+
+	/// Whether `event` is Esc with no modifier that would make it another shortcut.
+	static func isPlainEscape(_ event: NSEvent) -> Bool {
+		(event.type == .keyDown || event.type == .keyUp) && event.keyCode == escapeKeyCode
+			&& event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
 	}
 
 	static func disposition(for event: NSEvent) -> Disposition {
@@ -74,5 +86,43 @@ enum InputCapture {
 		default:
 			return .pass
 		}
+	}
+}
+
+/// Tells a press of Esc from a hold. A press goes to the other Mac at once, like any key; a hold
+/// of ``InputCapture/exitHoldSeconds`` leaves MokaScreen. Esc is the exit because it is known to
+/// reach MokaScreen's window, which no chord tried so far has been.
+struct EscapeHold: Equatable {
+	enum Action: Equatable {
+		/// Esc went down: forward it and start timing the hold.
+		case began
+		/// An auto-repeat while held: keep it from the other Mac, which has its Esc already.
+		case repeating
+		/// Esc came up before the hold was long enough: forward it and stop timing.
+		case ended
+		/// A key up with no hold in progress, e.g. after leaving: forward it.
+		case stray
+	}
+
+	private(set) var isHeld = false
+
+	mutating func keyDown(isRepeat: Bool) -> Action {
+		if isHeld || isRepeat {
+			isHeld = true
+			return .repeating
+		}
+		isHeld = true
+		return .began
+	}
+
+	mutating func keyUp() -> Action {
+		guard isHeld else { return .stray }
+		isHeld = false
+		return .ended
+	}
+
+	/// Forgets a hold, e.g. when the window stops being the key window mid-press.
+	mutating func cancel() {
+		isHeld = false
 	}
 }
