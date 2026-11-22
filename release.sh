@@ -394,6 +394,31 @@ wrangler r2 object put "$BUCKET/MokaScreen-$VERSION.dmg" --file "$DMG" \
 wrangler r2 object put "$BUCKET/MokaScreen.dmg" --file "$DMG" \
 	--content-type "application/x-apple-diskimage" --remote
 
+# --- 7b. Check the versioned download before the feed points anyone at it -------
+# Cloudflare caches what this address answers, a "not found" included: a request made
+# before the upload (a browser, a script, a verification run too early) leaves a
+# cached 404 that Sparkle then gets in place of the DMG. That happened to 0.1.33.
+# Stopping here leaves the previous release in the feed.
+echo "==> Checking the published download"
+DMG_BYTES=$(stat -f%z "$DMG")
+published_ok=0
+for attempt in 1 2 3 4 5; do
+	got=$(curl -s -m 120 -o /dev/null -w '%{http_code} %{size_download}' "$PUBLIC_BASE/MokaScreen-$VERSION.dmg" || true)
+	if [ "$got" = "200 $DMG_BYTES" ]; then
+		published_ok=1
+		break
+	fi
+	echo "    attempt $attempt: got '$got', expected '200 $DMG_BYTES'"
+	sleep 3
+done
+if [ "$published_ok" -ne 1 ]; then
+	echo "error: $PUBLIC_BASE/MokaScreen-$VERSION.dmg does not return the uploaded DMG." >&2
+	echo "       The file is in R2. If the address answers 404, Cloudflare has cached an earlier" >&2
+	echo "       'not found': purge that URL (dashboard > Caching > Configuration > Custom Purge)" >&2
+	echo "       and run this script again. The feed has not been changed." >&2
+	exit 1
+fi
+
 # --- 8. Sync the published feed state from R2 ---------------------------------
 # generate_appcast rebuilds the feed from whatever DMGs are in RELEASES_DIR, so a
 # release from a machine missing older DMGs would silently drop them from the feed.

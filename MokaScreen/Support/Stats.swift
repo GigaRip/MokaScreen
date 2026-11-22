@@ -62,9 +62,26 @@ struct SenderSnapshot: Equatable {
 	var displayComparedPerSecond = 0.0
 	/// Smooth Motion's delay on the display Mac in milliseconds; zero while it is off.
 	var displayPacing = 0.0
+	/// Reports received from the display Mac this second. It sends one a second while it is
+	/// showing the picture and none while the picture is hidden behind another app.
+	var displayReports = 0
 	/// The round trip of the ping the display Mac's clock offset came from, in milliseconds; zero
 	/// while the two Macs' clocks are not synchronized.
 	var displayClockRoundTrip = 0.0
+
+	/// A frame taking longer than this to reach the glass, or to be written, makes a slow second.
+	static let slowMillis = 250.0
+
+	/// Whether this second belongs in the stall log: a frame reached the glass very late, a write
+	/// to the cable was held up, or frames were captured and the display Mac, though showing the
+	/// picture, reported none shown.
+	///
+	/// The last case needs the display Mac to be reporting. With its picture hidden behind another
+	/// app it acknowledges nothing, by design, and through 0.1.37 every such second was logged.
+	var isSlowSecond: Bool {
+		latencyMax > Self.slowMillis || slowestSendMillis > Self.slowMillis
+			|| (capturedFrames >= 10 && latencyMax == 0 && displayReports > 0)
+	}
 
 	var capturedFPS: Double { interval > 0 ? Double(capturedFrames) / interval : 0 }
 	var sentFPS: Double { interval > 0 ? Double(sentFrames) / interval : 0 }
@@ -148,7 +165,10 @@ final class SenderStats: @unchecked Sendable {
 	/// Keeps the display Mac's latest report for the next snapshot. Its delays are already rolling
 	/// figures, so the report is held until the next one arrives.
 	func recordDisplayReport(_ report: DisplayReportMessage) {
-		lock.withLock { displayReport = report }
+		lock.withLock {
+			displayReport = report
+			current.displayReports += 1
+		}
 	}
 
 	/// Keeps the display Mac's latest pace report for the next snapshot.

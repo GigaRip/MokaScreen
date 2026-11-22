@@ -93,6 +93,44 @@ struct StatsTests {
 		#expect(stats.drain().recentCable == 0)
 	}
 
+	@Test func aPausedDisplayMacIsNotASlowSecond() {
+		// Captures, no frame acknowledged, and no report: the picture is hidden behind another app.
+		var paused = SenderSnapshot()
+		paused.capturedFrames = 47
+		paused.sentFrames = 47
+		#expect(!paused.isSlowSecond)
+
+		// The same with the display Mac reporting: it is showing the picture and nothing arrives.
+		var stuck = paused
+		stuck.displayReports = 1
+		#expect(stuck.isSlowSecond)
+	}
+
+	@Test func lateFramesAndHeldUpWritesAreSlowSeconds() {
+		var late = SenderSnapshot()
+		late.latencyMax = 960
+		#expect(late.isSlowSecond)
+
+		// As on 2026-11-21: a write blocked for seconds while nothing was acknowledged or reported.
+		var blocked = SenderSnapshot()
+		blocked.slowestSendMillis = 15_203
+		#expect(blocked.isSlowSecond)
+
+		var normal = SenderSnapshot()
+		normal.capturedFrames = 120
+		normal.latencyMax = 31
+		normal.slowestSendMillis = 4
+		normal.displayReports = 1
+		#expect(!normal.isSlowSecond)
+	}
+
+	@Test func displayReportsAreCountedEachSecond() {
+		let stats = SenderStats()
+		stats.recordDisplayReport(DisplayReportMessage(delayP50Micros: 1, delayP99Micros: 1, receivedFrames: 0, presentedFrames: 0, intervalMillis: 1000))
+		#expect(stats.drain().displayReports == 1)
+		#expect(stats.drain().displayReports == 0)
+	}
+
 	@Test func resetForgetsRecentLatency() {
 		let stats = SenderStats()
 		stats.recordPresented(latency: 0.030)

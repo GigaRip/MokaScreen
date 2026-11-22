@@ -513,19 +513,14 @@ final class SenderSession {
 		}
 	}
 
-	/// Frames taking longer than this to reach the display Mac's glass make the second a stall.
-	private static let stallLatencyMillis = 250.0
-
-	/// Writes a second's figures to the system log when frames took over
-	/// ``stallLatencyMillis`` to reach the glass, or none did. `notice` is the lowest level macOS keeps on
+	/// Writes a second's figures to the system log when it was slow (see
+	/// ``SenderSnapshot/isSlowSecond``). `notice` is the lowest level macOS keeps on
 	/// disk, so the figures can be read back days later with
 	/// `log show --predicate 'subsystem == "com.gigarip.mokascreen" AND category == "stall"'`.
 	/// They tell a slow cable (low Gbps, frames superseded) from a slow display Mac (high display
 	/// share, few draws) from slow capture (few frames captured).
 	private func logIfStalled(_ stats: SenderSnapshot) {
-		// A second with captures and not one frame reported shown is a stall too: nothing arrived.
-		let nothingShown = stats.capturedFrames >= 10 && stats.latencyMax == 0
-		guard stats.latencyMax > Self.stallLatencyMillis || nothingShown else { return }
+		guard stats.isSlowSecond else { return }
 		Log.stall.notice("Slow second: captured \(stats.capturedFrames, privacy: .public), sent \(stats.sentFrames, privacy: .public), superseded \(stats.supersededFrames, privacy: .public), \(stats.bytes, privacy: .public) bytes, slowest send \(stats.slowestSendMillis, format: .fixed(precision: 0), privacy: .public) ms for \(stats.slowestSendBytes, privacy: .public) bytes; delay p50 \(stats.latencyP50, format: .fixed(precision: 0), privacy: .public) ms, max \(stats.latencyMax, format: .fixed(precision: 0), privacy: .public) ms; display Mac share \(stats.displayDelay, format: .fixed(precision: 0), privacy: .public) ms, wait \(stats.displayWait, format: .fixed(precision: 0), privacy: .public) ms, \(stats.displayDrawsPerSecond, format: .fixed(precision: 0), privacy: .public) draws/s, \(stats.displayPresentedFPS, format: .fixed(precision: 0), privacy: .public) shown/s")
 	}
 
