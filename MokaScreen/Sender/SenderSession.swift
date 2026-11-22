@@ -37,6 +37,9 @@ final class SenderSession {
 	private(set) var recordingURL: URL?
 	/// True while Develop › Record Frame Timing is recording.
 	private(set) var isRecordingTiming = false
+	/// True while keyboard and trackpad sharing is on but this Mac has not been allowed to accept
+	/// the other Mac's input (Privacy & Security › Accessibility).
+	private(set) var inputNeedsPermission = false
 
 	/// Whether Develop › Record Frame Timing can start: connected and not already recording.
 	var canRecordTiming: Bool {
@@ -84,6 +87,9 @@ final class SenderSession {
 	/// already been replaced is ignored.
 	@ObservationIgnored private var displayGeneration = 0
 	@ObservationIgnored private let senderStats = SenderStats()
+	/// Repeats the display Mac's keyboard and trackpad here while sharing is on.
+	@ObservationIgnored private let injector = InputInjector()
+	@ObservationIgnored private var askedForInputPermission = false
 	@ObservationIgnored private let link = CaptureLink()
 	@ObservationIgnored private var settingsSync: SettingsSync!
 	/// The last minute of per-second statistics while connected, oldest first.
@@ -95,7 +101,10 @@ final class SenderSession {
 		shape = UserDefaults.standard.string(forKey: "displayShape").flatMap(DisplayShape.init) ?? .fullPanel
 		preferredReceiver = UserDefaults.standard.string(forKey: "preferredReceiver")
 		receiverPanel = UserDefaults.standard.data(forKey: "receiverPanel").flatMap { try? JSONDecoder().decode(PanelGeometry.self, from: $0) } ?? .macBookPro16
-		settingsSync = SettingsSync(send: { [link] settings in link.sendSettings(settings) })
+		settingsSync = SettingsSync(send: { [link] settings in link.sendSettings(settings) }, onChange: { [weak self] _ in
+			self?.updateInputForwarding()
+		})
+		updateInputForwarding()
 		// Property observers do not run during init, so the recorder is started by hand.
 		recordsStats = UserDefaults.standard.bool(forKey: "recordsStats")
 		updateRecorder()
@@ -363,6 +372,8 @@ final class SenderSession {
 		let closed = AsyncStream<Error>.makeStream()
 		let sender = FrameSender(stream: stream, width: size.width, height: size.height, stats: senderStats, settings: SharedSettings.current, onSettings: { [weak self] settings in
 			Task { @MainActor in self?.settingsSync.receive(settings) }
+		}, onInput: { [injector] input in
+			injector.handle(input)
 		}) { error in
 			closed.continuation.yield(error)
 			closed.continuation.finish()
@@ -387,6 +398,7 @@ final class SenderSession {
 			sender.stop()
 		}
 		sender.stop()
+		injector.releaseAll()
 		Log.transport.info("Disconnected from \(name, privacy: .public): \(String(describing: error), privacy: .public)")
 		return error
 	}
@@ -438,6 +450,8 @@ final class SenderSession {
 			MainActor.assumeIsolated {
 				guard let self else { return }
 				self.stats = self.senderStats.drain()
+				// Polled, as macOS sends no notice when the permission is granted.
+				self.updateInputForwarding()
 				if case .connected = self.status {
 					self.logIfStalled(self.stats)
 					self.history.append(self.stats)
@@ -464,6 +478,23 @@ final class SenderSession {
 		let nothingShown = stats.capturedFrames >= 10 && stats.latencyMax == 0
 		guard stats.latencyMax > Self.stallLatencyMillis || nothingShown else { return }
 		Log.stall.notice("Slow second: captured \(stats.capturedFrames, privacy: .public), sent \(stats.sentFrames, privacy: .public), superseded \(stats.supersededFrames, privacy: .public), \(stats.bytes, privacy: .public) bytes, slowest send \(stats.slowestSendMillis, format: .fixed(precision: 0), privacy: .public) ms for \(stats.slowestSendBytes, privacy: .public) bytes; delay p50 \(stats.latencyP50, format: .fixed(precision: 0), privacy: .public) ms, max \(stats.latencyMax, format: .fixed(precision: 0), privacy: .public) ms; display Mac share \(stats.displayDelay, format: .fixed(precision: 0), privacy: .public) ms, wait \(stats.displayWait, format: .fixed(precision: 0), privacy: .public) ms, \(stats.displayDrawsPerSecond, format: .fixed(precision: 0), privacy: .public) draws/s, \(stats.displayPresentedFPS, format: .fixed(precision: 0), privacy: .public) shown/s")
+	}
+
+	/// Matches the injector to Settings › Share the keyboard and trackpad, and asks macOS for
+	/// the permission the first time sharing is on without it.
+	private func updateInputForwarding() {
+		let shares = SharedSettings.current.forwardsInput
+		injector.isEnabled = shares
+		// Only while extending: this session also exists, stopped, on a Mac set to be the display,
+		// which posts nothing and must not be asked for the permission.
+		let needsPermission = shares && isRunning && !InputInjector.hasPermission
+		if needsPermission, !askedForInputPermission {
+			askedForInputPermission = true
+			InputInjector.requestPermission()
+		}
+		if inputNeedsPermission != needsPermission {
+			inputNeedsPermission = needsPermission
+		}
 	}
 
 	private func updateRecorder() {

@@ -147,6 +147,14 @@ final class FrameReceiver {
 		}
 	}
 
+	/// Sends one keyboard or trackpad event to the sender. Thread-safe; written on the queue that
+	/// writes `presented`, so events leave in the order they were made.
+	func sendInput(_ input: InputMessage) {
+		ackQueue.async { [self] in
+			try? stream.writeHeader { input.encode(into: $0) }
+		}
+	}
+
 	/// Sends one frame's timing to the sender. Thread-safe; written on the queue that writes
 	/// `presented`.
 	func sendFrameTiming(_ timing: FrameTimingMessage) {
@@ -250,7 +258,7 @@ private enum SenderMessage {
 		case .timingRequest: .timingRequest(try TimingRequestMessage.decode(p))
 		case .clockPong: .clockPong(try ClockPongMessage.decode(p))
 		// A rect outside a frame is a protocol error, not an unknown message.
-		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport, .frameTiming, .clockPing: throw WireError.unexpectedMessage(WireHeader.type(p))
+		case .rect, .hello, .helloAck, .presented, .displayReport, .paceReport, .frameTiming, .clockPing, .input: throw WireError.unexpectedMessage(WireHeader.type(p))
 		case nil: .unknown
 		}
 	}

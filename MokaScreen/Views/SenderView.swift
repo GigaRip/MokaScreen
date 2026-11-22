@@ -22,6 +22,10 @@ struct SenderView: View {
 				PermissionCallout(reopen: model.relaunch)
 			}
 
+			if session.inputNeedsPermission {
+				InputPermissionCallout()
+			}
+
 			InfoSection {
 				if let performance = session.performanceSummary {
 					InfoRow(label: "Performance") {
@@ -127,6 +131,34 @@ struct RoleHeader: View {
 				}
 			}
 		}
+	}
+}
+
+/// Asks for the Accessibility permission, which lets this Mac accept the other MacBook's
+/// keyboard and trackpad. Shown while Settings › Share the keyboard and trackpad is on without it.
+private struct InputPermissionCallout: View {
+	var body: some View {
+		HStack(alignment: .top, spacing: 14) {
+			Image(systemName: "keyboard")
+				.font(.system(size: 24))
+				.foregroundStyle(.orange)
+				.frame(width: 32)
+			VStack(alignment: .leading, spacing: 10) {
+				Text("Allow Accessibility")
+					.font(.headline)
+				Text("To use the other MacBook's keyboard and trackpad, turn on MokaScreen in Privacy & Security › Accessibility.")
+					.foregroundStyle(.secondary)
+					.fixedSize(horizontal: false, vertical: true)
+				Button("Open Privacy Settings") {
+					NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+				}
+				.buttonStyle(.borderedProminent)
+				.padding(.top, 2)
+			}
+		}
+		.padding(14)
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.background(.orange.opacity(0.1), in: .rect(cornerRadius: 10))
 	}
 }
 

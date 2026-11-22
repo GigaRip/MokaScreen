@@ -40,6 +40,7 @@ final class FrameSender {
 	private var nextFrameID: UInt64 = 1
 	private let onClose: (Error) -> Void
 	private let onSettings: (SharedSettings) -> Void
+	private let onInput: (InputMessage) -> Void
 	/// Capture time of each recent frame, so `presented` acknowledgements yield latency.
 	private let inflight = InflightFrames()
 	/// Develop › Record Frame Timing; idle unless a recording is running.
@@ -50,13 +51,16 @@ final class FrameSender {
 	///   - settings: This Mac's shared settings, sent before the first frame so the receiver
 	///     starts out matching them.
 	///   - onSettings: Called from a background thread when the receiver changes a setting.
+	///   - onInput: Called from the acknowledgement thread for each keyboard or trackpad event
+	///     the receiver forwards.
 	///   - onClose: Called once, from a background thread, when the connection fails.
-	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, settings: SharedSettings, onSettings: @escaping (SharedSettings) -> Void, onClose: @escaping (Error) -> Void) {
+	init(stream: ByteStream, width: Int, height: Int, stats: SenderStats, settings: SharedSettings, onSettings: @escaping (SharedSettings) -> Void, onInput: @escaping (InputMessage) -> Void = { _ in }, onClose: @escaping (Error) -> Void) {
 		self.stream = stream
 		self.width = width
 		self.height = height
 		self.stats = stats
 		self.onSettings = onSettings
+		self.onInput = onInput
 		self.onClose = onClose
 		pendingSettings = settings
 		dirty = DirtyRegion(width: width, height: height)
@@ -269,6 +273,8 @@ final class FrameSender {
 					stats.recordPaceReport(report)
 				case .frameTiming(let report):
 					timing.record(report)
+				case .input(let input):
+					onInput(input)
 				case .clockPing(let ping):
 					let receivedTime = HostClock.now
 					condition.lock()
@@ -306,6 +312,7 @@ private enum ReceiverMessage {
 	case paceReport(PaceReportMessage)
 	case frameTiming(FrameTimingMessage)
 	case clockPing(ClockPingMessage)
+	case input(InputMessage)
 	case unknown
 
 	static func decode(_ p: UnsafeRawPointer) throws -> ReceiverMessage {
@@ -316,6 +323,7 @@ private enum ReceiverMessage {
 		case .paceReport: .paceReport(try PaceReportMessage.decode(p))
 		case .frameTiming: .frameTiming(try FrameTimingMessage.decode(p))
 		case .clockPing: .clockPing(try ClockPingMessage.decode(p))
+		case .input: .input(try InputMessage.decode(p))
 		default: .unknown
 		}
 	}

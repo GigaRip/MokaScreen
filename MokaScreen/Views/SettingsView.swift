@@ -9,13 +9,14 @@
 
 import SwiftUI
 
-/// MokaScreen › Settings (⌘,). The display and statistics settings are kept the same on both
+/// MokaScreen › Settings (⌘,). The display, keyboard and statistics settings are kept the same on both
 /// Macs while connected (see ``SettingsSync``); Developer mode belongs to this Mac only.
 struct SettingsView: View {
 	@AppStorage(SmoothMotionPreference.key) private var smoothMotion = SmoothMotionPreference.defaultValue
 	@AppStorage(SmoothMotionFloorPreference.key) private var smoothMotionFloor = SmoothMotionFloorPreference.defaultValue
 	@AppStorage(FixedRefreshRatePreference.key) private var fixedRefreshRate = FixedRefreshRatePreference.defaultValue
 	@AppStorage(StatisticsPreference.key) private var showsStatistics = false
+	@AppStorage(InputForwardingPreference.key) private var forwardsInput = InputForwardingPreference.defaultValue
 	@AppStorage(DeveloperModePreference.key) private var developerMode = false
 
 	static let width: CGFloat = 500
@@ -45,6 +46,15 @@ struct SettingsView: View {
 			}
 
 			Section {
+				Toggle(isOn: $forwardsInput) {
+					Text("Share the keyboard and trackpad")
+					Text("The keyboard and trackpad of the MacBook showing the display also control the Mac you work on. On that MacBook, ⌘Tab still switches its own apps and ⌘Esc leaves MokaScreen. New, and still being tested.")
+				}
+			} header: {
+				Text("Keyboard and trackpad")
+			}
+
+			Section {
 				Toggle(isOn: $showsStatistics) {
 					Text("Show statistics")
 					Text("Adds frame rates and the delay, part by part, to the MokaScreen window on the Mac you work on.")
@@ -52,7 +62,7 @@ struct SettingsView: View {
 			} header: {
 				Text("Statistics")
 			} footer: {
-				Text("Display and statistics settings are kept the same on both Macs.")
+				Text("Display, keyboard and statistics settings are kept the same on both Macs.")
 					.font(.footnote)
 					.foregroundStyle(.secondary)
 			}

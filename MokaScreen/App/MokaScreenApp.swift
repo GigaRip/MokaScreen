@@ -131,6 +131,17 @@ enum FixedRefreshRatePreference {
 	}
 }
 
+/// Whether the display Mac's keyboard and trackpad are sent to the Mac you work on while it
+/// shows the picture. Off by default while the feature is new.
+enum InputForwardingPreference {
+	static let key = "forwardsInput"
+	static let defaultValue = false
+
+	static func isOn(in defaults: UserDefaults) -> Bool {
+		defaults.object(forKey: key) as? Bool ?? defaultValue
+	}
+}
+
 /// The settings both Macs keep the same while connected.
 struct SharedSettings: Equatable {
 	var showsStatistics: Bool
@@ -138,6 +149,8 @@ struct SharedSettings: Equatable {
 	var fixedRefreshRate: Bool = FixedRefreshRatePreference.defaultValue
 	/// See ``SmoothMotionFloorPreference``.
 	var smoothMotionFloorMillis: Int = SmoothMotionFloorPreference.defaultValue
+	/// See ``InputForwardingPreference``.
+	var forwardsInput: Bool = InputForwardingPreference.defaultValue
 
 	/// This Mac's settings, from the standard user defaults.
 	static var current: SharedSettings {
@@ -150,7 +163,8 @@ struct SharedSettings: Equatable {
 			showsStatistics: defaults.bool(forKey: StatisticsPreference.key),
 			smoothMotion: SmoothMotionPreference.isOn(in: defaults),
 			fixedRefreshRate: FixedRefreshRatePreference.isOn(in: defaults),
-			smoothMotionFloorMillis: SmoothMotionFloorPreference.millis(in: defaults)
+			smoothMotionFloorMillis: SmoothMotionFloorPreference.millis(in: defaults),
+			forwardsInput: InputForwardingPreference.isOn(in: defaults)
 		)
 	}
 
@@ -159,6 +173,7 @@ struct SharedSettings: Equatable {
 		defaults.set(smoothMotion, forKey: SmoothMotionPreference.key)
 		defaults.set(fixedRefreshRate, forKey: FixedRefreshRatePreference.key)
 		defaults.set(smoothMotionFloorMillis, forKey: SmoothMotionFloorPreference.key)
+		defaults.set(forwardsInput, forKey: InputForwardingPreference.key)
 	}
 }
 

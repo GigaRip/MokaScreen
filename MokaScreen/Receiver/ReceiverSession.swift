@@ -61,6 +61,7 @@ final class ReceiverSession {
 			self?.connection?.renderer.smoothMotion = settings.smoothMotion
 			self?.connection?.renderer.smoothMotionFloorMillis = settings.smoothMotionFloorMillis
 			self?.updateRefreshRateRequest(fixed: settings.fixedRefreshRate)
+			self?.updateInputForwarding()
 		})
 	}
 
@@ -248,9 +249,12 @@ final class ReceiverSession {
 		case .fullScreen:
 			let screen = Self.builtInScreen()
 			let fullScreen = FullScreenWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false, screen: screen)
-			// Esc means "give me my screen back": stop listening too, or the sender would
+			// ⌘Esc means "give me my screen back": stop listening too, or the sender would
 			// reconnect within a second and take the screen over again.
 			fullScreen.onExit = { [weak self] in self?.stop() }
+			fullScreen.onInput = { [weak connection] input in connection?.receiver.sendInput(input) }
+			// Pointer movement with no button held reaches a window only if it asks.
+			fullScreen.acceptsMouseMovedEvents = true
 			fullScreen.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
 			fullScreen.setFrame(screen.frame, display: false)
 			window = fullScreen
@@ -379,6 +383,7 @@ final class ReceiverSession {
 		connection.activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical], reason: "Showing another Mac's display")
 		connection.driver?.setPaused(false)
 		status = .showing(peer: connection.peer)
+		updateInputForwarding()
 	}
 
 	/// Holds or releases the display at 120 Hz while showing, as Settings › Hold the display at 120 Hz changes.
@@ -393,7 +398,34 @@ final class ReceiverSession {
 		Log.render.info("Fixed 120 Hz \(fixed ? "on" : "off", privacy: .public)")
 	}
 
+	/// Starts or stops sending this Mac's keyboard and trackpad to the other Mac, to match
+	/// Settings › Share the keyboard and trackpad and whether the picture is showing.
+	private func updateInputForwarding() {
+		guard let connection, let window = connection.window as? FullScreenWindow else { return }
+		var forwards = false
+		if case .showing = status {
+			forwards = InputForwardingPreference.isOn(in: .standard)
+		}
+		setInputForwarding(forwards, for: connection, window: window)
+	}
+
+	private func setInputForwarding(_ forwards: Bool, for connection: Connection, window: FullScreenWindow) {
+		guard window.forwardsInput != forwards else { return }
+		window.forwardsInput = forwards
+		// While forwarding, this Mac's own pointer stays where it is: trackpad movement still
+		// arrives as deltas, but the hidden pointer cannot wander into a hot corner or the Dock.
+		CGAssociateMouseAndMouseCursorPosition(forwards ? 0 : 1)
+		if !forwards {
+			// The other Mac must not be left holding a key this Mac will never report released,
+			// such as ⌘ after ⌘Tab took the picture away.
+			connection.receiver.sendInput(InputMessage(kind: .releaseAll))
+		}
+	}
+
 	private func endShowing(_ connection: Connection) {
+		if let window = connection.window as? FullScreenWindow {
+			setInputForwarding(false, for: connection, window: window)
+		}
 		connection.driver?.setPaused(true)
 		connection.refreshRate?.invalidate()
 		connection.refreshRate = nil

@@ -25,7 +25,9 @@ import Foundation
 /// Record Frame Timing the sender sends a `timingRequest`, and for its duration the receiver
 /// answers every frame it draws with a `frameTiming`. The receiver sends a `clockPing` four
 /// times a second and the sender answers each with a `clockPong`, from which the receiver
-/// works out the difference between the two Macs' clocks. A side ignores a
+/// works out the difference between the two Macs' clocks. With keyboard and trackpad sharing
+/// on, the receiver sends an `input` for every key, pointer movement, click and scroll made on
+/// it while it shows the picture. A side ignores a
 /// header type it does not know, outside a frame, so a later message type that
 /// carries no payload does not need a version change.
 enum Wire {
@@ -59,6 +61,7 @@ enum MessageType: UInt32 {
 	case frameTiming = 10
 	case clockPing = 11
 	case clockPong = 12
+	case input = 13
 }
 
 /// Errors raised while decoding the wire protocol.
@@ -246,7 +249,7 @@ struct SettingsMessage: Equatable {
 	func encode(into p: UnsafeMutableRawPointer) {
 		WireHeader.clear(p)
 		WireHeader.store(MessageType.settings.rawValue, p, 0)
-		WireHeader.store(UInt32(settings.showsStatistics ? 1 : 0) | UInt32(settings.smoothMotion ? 2 : 0) | UInt32(settings.fixedRefreshRate ? 4 : 0), p, 4)
+		WireHeader.store(UInt32(settings.showsStatistics ? 1 : 0) | UInt32(settings.smoothMotion ? 2 : 0) | UInt32(settings.fixedRefreshRate ? 4 : 0) | UInt32(settings.forwardsInput ? 8 : 0), p, 4)
 		WireHeader.store(UInt32(clamping: settings.smoothMotionFloorMillis), p, 8)
 	}
 
@@ -257,8 +260,85 @@ struct SettingsMessage: Equatable {
 			showsStatistics: flags & 1 != 0,
 			smoothMotion: flags & 2 != 0,
 			fixedRefreshRate: flags & 4 != 0,
-			smoothMotionFloorMillis: Int(min(WireHeader.load32(p, 8), 1000))
+			smoothMotionFloorMillis: Int(min(WireHeader.load32(p, 8), 1000)),
+			forwardsInput: flags & 8 != 0
 		))
+	}
+}
+
+/// Receiver → sender: one keyboard or trackpad event made on the display Mac, to be repeated on
+/// the Mac you work on. See ``InputCapture`` and ``InputInjector``.
+///
+/// Layout: `kind` at 4, `detail` at 5, `code` at 6, `flags` at 8, `x` and `y` at 16 and 20,
+/// `pointX` and `pointY` at 24 and 26, `lineX` and `lineY` at 28 and 29, `phase` at 30,
+/// `momentumPhase` at 31.
+struct InputMessage: Equatable {
+	enum Kind: UInt8 {
+		case keyDown = 1
+		case keyUp = 2
+		/// A modifier key went down or up; `flags` is the state afterwards.
+		case flagsChanged = 3
+		/// The pointer moved by `x`, `y` points, y downwards.
+		case pointerMoved = 4
+		case buttonDown = 5
+		case buttonUp = 6
+		case scroll = 7
+		/// The display Mac stopped forwarding: let go of every key and button still held.
+		case releaseAll = 8
+	}
+
+	var kind: Kind
+	/// Keys: 1 for an auto-repeat. Buttons: the click count. Scroll: 1 for a continuous
+	/// (trackpad) scroll.
+	var detail: UInt8 = 0
+	/// The virtual key code, or the mouse button number.
+	var code: UInt16 = 0
+	/// `CGEventFlags` at the time of the event.
+	var flags: UInt64 = 0
+	/// Pointer movement in points; for a scroll, the fixed-point deltas.
+	var x: Float32 = 0
+	var y: Float32 = 0
+	/// Scroll deltas in pixels and in lines.
+	var pointX: Int16 = 0
+	var pointY: Int16 = 0
+	var lineX: Int8 = 0
+	var lineY: Int8 = 0
+	/// `CGScrollPhase` and `CGMomentumScrollPhase`, which carry a trackpad scroll's start, end
+	/// and coasting.
+	var phase: UInt8 = 0
+	var momentumPhase: UInt8 = 0
+
+	func encode(into p: UnsafeMutableRawPointer) {
+		WireHeader.clear(p)
+		WireHeader.store(MessageType.input.rawValue, p, 0)
+		WireHeader.store(UInt32(kind.rawValue) | UInt32(detail) << 8 | UInt32(code) << 16, p, 4)
+		WireHeader.store(flags, p, 8)
+		WireHeader.store(x.bitPattern, p, 16)
+		WireHeader.store(y.bitPattern, p, 20)
+		WireHeader.store(UInt32(UInt16(bitPattern: pointX)) | UInt32(UInt16(bitPattern: pointY)) << 16, p, 24)
+		WireHeader.store(UInt32(UInt8(bitPattern: lineX)) | UInt32(UInt8(bitPattern: lineY)) << 8 | UInt32(phase) << 16 | UInt32(momentumPhase) << 24, p, 28)
+	}
+
+	static func decode(_ p: UnsafeRawPointer) throws -> InputMessage {
+		try WireHeader.expect(.input, p)
+		let head = WireHeader.load32(p, 4)
+		guard let kind = Kind(rawValue: UInt8(truncatingIfNeeded: head)) else { throw WireError.unexpectedMessage(MessageType.input.rawValue) }
+		let points = WireHeader.load32(p, 24)
+		let tail = WireHeader.load32(p, 28)
+		return InputMessage(
+			kind: kind,
+			detail: UInt8(truncatingIfNeeded: head >> 8),
+			code: UInt16(truncatingIfNeeded: head >> 16),
+			flags: WireHeader.load64(p, 8),
+			x: Float32(bitPattern: WireHeader.load32(p, 16)),
+			y: Float32(bitPattern: WireHeader.load32(p, 20)),
+			pointX: Int16(bitPattern: UInt16(truncatingIfNeeded: points)),
+			pointY: Int16(bitPattern: UInt16(truncatingIfNeeded: points >> 16)),
+			lineX: Int8(bitPattern: UInt8(truncatingIfNeeded: tail)),
+			lineY: Int8(bitPattern: UInt8(truncatingIfNeeded: tail >> 8)),
+			phase: UInt8(truncatingIfNeeded: tail >> 16),
+			momentumPhase: UInt8(truncatingIfNeeded: tail >> 24)
+		)
 	}
 }
 

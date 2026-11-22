@@ -378,13 +378,46 @@ final class DisplayTicks: Sendable {
 }
 
 /// A borderless window that covers a whole screen, including the area beside the notch.
+///
+/// ⌘Esc leaves (see ``InputCapture/isExitChord(_:)``). With ``forwardsInput`` on, every other
+/// keyboard and trackpad event the window is given goes to ``onInput`` and no further.
 final class FullScreenWindow: NSWindow {
 	var onExit: (() -> Void)?
+	/// Whether keyboard and trackpad events are sent to ``onInput`` and kept from AppKit.
+	var forwardsInput = false
+	var onInput: ((InputMessage) -> Void)?
 
 	override var canBecomeKey: Bool { true }
 	override var canBecomeMain: Bool { true }
 
-	override func cancelOperation(_ sender: Any?) {
-		onExit?()
+	/// Returns true when the event was dealt with here.
+	private func intercept(_ event: NSEvent) -> Bool {
+		if InputCapture.isExitChord(event) {
+			onExit?()
+			return true
+		}
+		guard forwardsInput else { return false }
+		switch InputCapture.disposition(for: event) {
+		case .forward(let message):
+			onInput?(message)
+			return true
+		case .swallow:
+			return true
+		case .pass:
+			return false
+		}
+	}
+
+	override func sendEvent(_ event: NSEvent) {
+		if !intercept(event) {
+			super.sendEvent(event)
+		}
+	}
+
+	// NSApplication offers a key press to the key window as a key equivalent, then to the menu
+	// bar, before the window's sendEvent. Taking it here keeps ⌘Q and the like from MokaScreen's
+	// own menus, so they reach the other Mac as they would from its own keyboard.
+	override func performKeyEquivalent(with event: NSEvent) -> Bool {
+		intercept(event) || super.performKeyEquivalent(with: event)
 	}
 }
