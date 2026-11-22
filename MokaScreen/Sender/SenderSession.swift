@@ -57,8 +57,8 @@ final class SenderSession {
 		didSet { UserDefaults.standard.set(shape.rawValue, forKey: "displayShape") }
 	}
 
-	/// The screen of the display Mac last connected to. The virtual display is created at this
-	/// size so that reconnecting to the same Mac never has to rebuild it.
+	/// The screen of the display Mac last connected to: the size the virtual display is created
+	/// at when a receiver publishes no geometry of its own.
 	private(set) var receiverPanel: PanelGeometry {
 		didSet { UserDefaults.standard.set(try? JSONEncoder().encode(receiverPanel), forKey: "receiverPanel") }
 	}
@@ -80,6 +80,8 @@ final class SenderSession {
 	@ObservationIgnored private var followsBridge = false
 	@ObservationIgnored private var browser: BonjourBrowser?
 	@ObservationIgnored private var connectTask: Task<Void, Never>?
+	/// Waiting to remove the virtual display after a connection was lost.
+	@ObservationIgnored private var displayRemoval: Task<Void, Never>?
 	@ObservationIgnored private var statsTimer: Timer?
 	@ObservationIgnored private var recorder: StatsRecorder?
 	@ObservationIgnored private var loopback = false
@@ -132,34 +134,36 @@ final class SenderSession {
 		return "\(refreshRate) Hz  ·  \(milliseconds) ms delay"
 	}
 
-	/// Creates the virtual display, starts capturing it, and connects to a receiver over the
-	/// Thunderbolt Bridge — or, with `loopback`, to a receiver in this same app.
+	/// How long the virtual display outlives its connection. Long enough to ride out a connection
+	/// that drops and comes straight back; short enough that windows left on the extended display
+	/// return to this Mac's own screen soon after the cable is pulled.
+	static let displayGraceSeconds = 3.0
+
+	/// Looks for a receiver over the Thunderbolt Bridge — or, with `loopback`, in this same app —
+	/// and connects to it. The virtual display is created once a receiver has answered, and
+	/// exists only while one is connected.
+	///
+	/// Through 0.1.36 the display was created here and kept until ``stop()``. With the cable
+	/// unplugged, or before the other Mac was ever found, macOS still had a second screen that
+	/// nothing showed, and windows on it could not be seen.
 	func start(loopback: Bool = false) {
 		guard status == .stopped else { return }
 		self.loopback = loopback
 		status = .starting
 		lastError = nil
 		startStatsTimer()
-		Task {
-			do {
-				try await startDisplayAndCapture()
-			} catch CaptureError.permissionDenied {
-				teardownDisplay()
-				status = .needsPermission
-				return
-			} catch {
-				teardownDisplay()
-				status = .failed(String(describing: error))
-				return
-			}
-			if loopback {
-				status = .searching
-				startConnecting()
-			} else {
-				status = .waitingForCable
-				followsBridge = true
-				browseBridge()
-			}
+		guard CGPreflightScreenCaptureAccess() else {
+			CGRequestScreenCaptureAccess()
+			status = .needsPermission
+			return
+		}
+		if loopback {
+			status = .searching
+			startConnecting()
+		} else {
+			status = .waitingForCable
+			followsBridge = true
+			browseBridge()
 		}
 	}
 
@@ -215,7 +219,30 @@ final class SenderSession {
 		self.capturer = capturer
 	}
 
+	/// Removes the virtual display ``displayGraceSeconds`` from now unless a connection is made
+	/// first. macOS then moves its windows to this Mac's own screen.
+	private func scheduleDisplayRemoval() {
+		guard display != nil, displayRemoval == nil else { return }
+		displayRemoval = Task { [weak self] in
+			try? await Task.sleep(for: .seconds(Self.displayGraceSeconds))
+			guard let self, !Task.isCancelled else { return }
+			self.displayRemoval = nil
+			if case .connected = self.status { return }
+			Log.display.notice("Removing the virtual display: nothing has been connected for \(Self.displayGraceSeconds, privacy: .public) s")
+			self.teardownDisplay()
+		}
+	}
+
+	private func cancelDisplayRemoval() {
+		displayRemoval?.cancel()
+		displayRemoval = nil
+	}
+
 	private func teardownDisplay() {
+		cancelDisplayRemoval()
+		// The display's termination handler can run when it is released. Without this it would
+		// take the removal for macOS's own and restart the session.
+		displayGeneration += 1
 		let capturer = capturer
 		self.capturer = nil
 		Task { await capturer?.stop() }
@@ -226,13 +253,13 @@ final class SenderSession {
 		displaySize = nil
 	}
 
-	/// Replaces the virtual display with one sized for `panel`.
+	/// Creates the virtual display for `panel`, replacing any there is.
 	///
-	/// macOS moves the old display's windows to another screen when it disappears; the new one
-	/// has the same vendor, product, and serial number, so it takes the old one's place in the
+	/// macOS moves a display's windows to another screen when it disappears; a new one has the
+	/// same vendor, product, and serial number, so it takes the old one's place in the
 	/// arrangement.
 	private func rebuildDisplay(for panel: PanelGeometry) async throws {
-		Log.display.info("Resizing the virtual display for a \(panel.width, privacy: .public)×\(panel.height, privacy: .public) pt screen")
+		Log.display.info("Creating the virtual display for a \(panel.width, privacy: .public)×\(panel.height, privacy: .public) pt screen")
 		receiverPanel = panel
 		let capturer = capturer
 		self.capturer = nil
@@ -292,6 +319,7 @@ final class SenderSession {
 			connectTask = nil
 			link.setSender(nil)
 			if isRunning { status = .waitingForCable }
+			scheduleDisplayRemoval()
 			return
 		}
 		do {
@@ -315,6 +343,9 @@ final class SenderSession {
 					self.lastError = String(describing: error)
 				}
 				self.link.setSender(nil)
+				if self.isRunning {
+					self.scheduleDisplayRemoval()
+				}
 				guard !Task.isCancelled, self.isRunning else { return }
 				if case .connected = self.status { self.status = .searching }
 				try? await Task.sleep(for: .seconds(1))
@@ -350,22 +381,37 @@ final class SenderSession {
 			}
 		}
 
-		if display?.panel != panel || display?.shape != shape {
-			do {
-				try await rebuildDisplay(for: panel)
-			} catch {
-				return error
-			}
-		}
-		guard let display else { return nil }
-		let size = display.currentPixelSize
-		let hello = HelloMessage(width: UInt32(size.width), height: UInt32(size.height))
+		// The receiver has to answer before there is a display: one that is advertised but cannot
+		// be reached must not put a second screen on this Mac.
 		let stream: TCPStream
 		do {
 			stream = try await Task.detached(priority: .userInitiated) {
-				try Self.connectAndHandshake(addresses: addresses, interfaceIndex: interfaceIndex, hello: hello)
+				try Self.connect(addresses: addresses, interfaceIndex: interfaceIndex)
 			}.value
 		} catch {
+			return error
+		}
+		cancelDisplayRemoval()
+		if display == nil || display?.panel != panel || display?.shape != shape {
+			do {
+				try await rebuildDisplay(for: panel)
+			} catch {
+				stream.close()
+				return error
+			}
+		}
+		guard let display, isRunning, !Task.isCancelled else {
+			stream.close()
+			return nil
+		}
+		let size = display.currentPixelSize
+		let hello = HelloMessage(width: UInt32(size.width), height: UInt32(size.height))
+		do {
+			try await Task.detached(priority: .userInitiated) {
+				try Self.handshake(on: stream, hello: hello)
+			}.value
+		} catch {
+			stream.close()
 			return error
 		}
 
@@ -403,22 +449,25 @@ final class SenderSession {
 		return error
 	}
 
-	/// Tries each address in turn and performs the hello exchange on the first that answers.
-	nonisolated private static func connectAndHandshake(addresses: [SocketAddress], interfaceIndex: UInt32, hello: HelloMessage) throws -> TCPStream {
+	/// Tries each address in turn and returns a connection to the first that answers.
+	nonisolated private static func connect(addresses: [SocketAddress], interfaceIndex: UInt32) throws -> TCPStream {
 		var lastError: Error = TransportError.unresolvable("receiver")
 		for address in addresses {
 			do {
-				let stream = try TCPStream.connect(to: address, interfaceIndex: interfaceIndex)
-				stream.setReadTimeout(3)
-				try stream.writeHeader { hello.encode(into: $0) }
-				_ = try stream.readHeader(HelloAckMessage.decode)
-				stream.setReadTimeout(nil)
-				return stream
+				return try TCPStream.connect(to: address, interfaceIndex: interfaceIndex)
 			} catch {
 				lastError = error
 			}
 		}
 		throw lastError
+	}
+
+	/// Performs the hello exchange, which tells the receiver the display's size.
+	nonisolated private static func handshake(on stream: TCPStream, hello: HelloMessage) throws {
+		stream.setReadTimeout(3)
+		try stream.writeHeader { hello.encode(into: $0) }
+		_ = try stream.readHeader(HelloAckMessage.decode)
+		stream.setReadTimeout(nil)
 	}
 
 	/// Records how every frame travels from capture to the display Mac's glass for `seconds`,
